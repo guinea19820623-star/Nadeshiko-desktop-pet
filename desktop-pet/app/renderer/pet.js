@@ -21,6 +21,7 @@ const ACTION_LINES = {
   curious: '嗯？', pose: '♪', happy: '嘿嘿♪', pat: '再摸一下嘛…', drag: '哇！放我下來～', dizzy: '暈…',
   pray: '願一切順利～', doze: 'Zzz…', curtsy: '日安～', pirouette: '轉一圈～', arabesque: '♪～',
   nod: '嗯嗯！', shake: '唔…不對吧？', mail: '有信來囉～', gift: '聖誕快樂～', birthday: '生日快樂～', lantern: '願望會實現的～', sparkler: '好漂亮～',
+  newyear: '新年快樂～', petbday: '謝謝你遇見我～', dragonboat: '端午節快樂～', valentine: '情人節快樂…', midautumn: '中秋節快樂～',
 };
 
 const S = {
@@ -297,6 +298,7 @@ function draw() {
     ctx.globalAlpha = 1;
   }
   drawSparks();
+  drawMotes();
 }
 
 // 目前畫出來的頭頂在哪（視窗內座標），泡泡跟著它
@@ -411,7 +413,7 @@ function idleMode(duration = rand(5, 12), sprite = 'idle') {
 
 // 動作 → 動畫片段（manifest.clips）。東張西望有正面與側身兩種，在 poseMode 裡隨機挑
 // 歡呼：Claude 完成時用循環版 cheer，自己歡呼整段播一次 cheerall（最後放下手回站姿）
-const POSE_CLIP = { yawn: 'yawn', stretch: 'stretch', wave: 'wave', cheer: 'cheerall', nap: 'sleep', pose: 'pose', shy: 'shy', happy: 'happy', curtsy: 'curtsy', pirouette: 'pirouette', arabesque: 'arabesque', nod: 'nod', shake: 'shake', mail: 'mail', gift: 'gift', birthday: 'birthday', lantern: 'lantern', sparkler: 'sparkler' };
+const POSE_CLIP = { yawn: 'yawn', stretch: 'stretch', wave: 'wave', cheer: 'cheerall', nap: 'sleep', pose: 'pose', shy: 'shy', happy: 'happy', curtsy: 'curtsy', pirouette: 'pirouette', arabesque: 'arabesque', nod: 'nod', shake: 'shake', mail: 'mail', gift: 'gift', birthday: 'birthday', lantern: 'lantern', sparkler: 'sparkler', newyear: 'newyear', petbday: 'petbday', dragonboat: 'dragonboat', valentine: 'valentine', midautumn: 'midautumn' };
 
 // 定點姿勢（打哈欠、伸懶腰、揮手…）
 function poseMode(kind, duration) {
@@ -435,6 +437,11 @@ function poseMode(kind, duration) {
     birthday: { sprite: 'idle', dur: 5.5 },
     lantern: { sprite: 'idle', dur: 4 },
     sparkler: { sprite: 'idle', dur: 4.7 },
+    newyear: { sprite: 'idle', dur: 4.7 },
+    petbday: { sprite: 'idle', dur: 4.8 },
+    dragonboat: { sprite: 'idle', dur: 4.5 },
+    valentine: { sprite: 'idle', dur: 4.2 },
+    midautumn: { sprite: 'idle', dur: 4.8 },
   }[kind];
   // 有動畫片段就播片段，沒有（或還沒載好）退回舊的單張圖加程式動作
   const clip = kind === 'curious' ? 'curious' : POSE_CLIP[kind]; // 東張西望只留 49 格正面版（祐 2026-11-12）
@@ -445,6 +452,7 @@ function poseMode(kind, duration) {
     else if (Number.isFinite(dur)) dur = Math.max(dur, clipSeconds(clip) + clipCore.loopLength(def)); // 揮手、歡呼：至少一輪
   }
   let lanternSent = false;
+  const motesSent = []; // 這段動作裡哪幾次光點已經灑過（中秋有出現、消失各一次的話）
   return {
     name: kind,
     enter() {
@@ -460,6 +468,12 @@ function poseMode(kind, duration) {
       }
       // 仙女棒：影片裡只有棒子，火花照每格棒子尖端的位置補畫（第 12–31 格，30 起慢慢燒完）
       if (kind === 'sparkler' && def && clipRes[clip] && clipRes[clip].state === 'ready') emitSparks(dt, clipFrameNo(clip, t));
+      // 紅包、石竹花束：影片裡是突然消失的，播到那一格時在道具的位置補金色光點（花束再加花瓣）
+      const mbs = [].concat(MOTE_BURSTS[kind] || []);
+      if (mbs.length && def && clipRes[clip] && clipRes[clip].state === 'ready') {
+        const no = clipFrameNo(clip, t);
+        mbs.forEach((mb, i) => { if (!motesSent[i] && no >= mb.at) { motesSent[i] = true; emitMotes(mb); } });
+      }
       // 片段本身就是動畫，不再疊程式的呼吸、搖晃與跳動
       if (def && playClip(clip, t, { base: 'idle', fadeIn: 0.2, fadeOut: 0.3, dur: Number.isFinite(dur) ? dur : undefined })) return t < dur;
       if (def && waitingClip(clip) && t < 1.5) return true; // 載入中沿用前一格，不閃舊圖
@@ -488,15 +502,33 @@ function poseMode(kind, duration) {
 // 依時段打招呼：開機與喚醒時提屈膝禮（祐 2026-11-03），跨過時段（早／午／下午／晚／深夜）時揮手
 const periodOf = (h = new Date().getHours()) => (h >= 5 && h < 11 ? 'morning' : h < 14 && h >= 11 ? 'noon' : h >= 14 && h < 18 ? 'afternoon' : h >= 18 && h < 23 ? 'evening' : 'night');
 // 開機、喚醒的招呼：平常提屈膝禮；主人生日（控制面板設定）捧蛋糕；12 月 24、25 日送聖誕禮物（祐 2026-11-12）
+// 祐 2026-11-14：農曆新年（初一～初五，國曆日期查表）拱手拜年送紅包；撫子的生日（控制面板設定，預設 3/30，其他人可以填「與桌寵見面的日子」）捧石竹花
+// 2026-11-15：端午、中秋（國曆日期查表）提香包、捧月餅賞月；情人節 2/14 害羞遞巧克力
+// 優先序：主人生日 ＞ 撫子的生日 ＞ 情人節 ＞ 農曆新年 ＞ 端午 ＞ 中秋 ＞ 聖誕 ＞ 平常
+const LUNAR_NEW_YEAR = { 2027: '02-06', 2028: '01-26', 2029: '02-13', 2030: '02-03', 2031: '01-23', 2032: '02-11', 2033: '01-31', 2034: '02-19', 2035: '02-08', 2036: '01-28' };
+const DRAGON_BOAT = { 2027: '06-09', 2028: '05-28', 2029: '06-16', 2030: '06-05', 2031: '06-24', 2032: '06-12', 2033: '06-01', 2034: '06-20', 2035: '06-10', 2036: '05-30' };
+const MID_AUTUMN = { 2027: '09-15', 2028: '10-03', 2029: '09-22', 2030: '09-12', 2031: '10-01', 2032: '09-19', 2033: '09-08', 2034: '09-27', 2035: '09-16', 2036: '10-04' };
+function isLunarNewYear(now = new Date()) {
+  const d = LUNAR_NEW_YEAR[now.getFullYear()];
+  if (!d) return false;
+  const [m, day] = d.split('-').map(Number);
+  const diff = Math.round((new Date(now.getFullYear(), now.getMonth(), now.getDate()) - new Date(now.getFullYear(), m - 1, day)) / 86400000);
+  return diff >= 0 && diff <= 4; // 初一到初五
+}
 function greetClip(now = new Date()) {
   const mmdd = `${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
   if (S.settings && S.settings.birthdayOn && S.settings.birthday === mmdd && clipDef('birthday')) return 'birthday';
+  if (S.settings && S.settings.petBirthdayOn !== false && (S.settings.petBirthday || '03-30') === mmdd && clipDef('petbday')) return 'petbday';
+  if (mmdd === '02-14' && clipDef('valentine')) return 'valentine';
+  if (isLunarNewYear(now) && clipDef('newyear')) return 'newyear';
+  if (DRAGON_BOAT[now.getFullYear()] === mmdd && clipDef('dragonboat')) return 'dragonboat';
+  if (MID_AUTUMN[now.getFullYear()] === mmdd && clipDef('midautumn')) return 'midautumn';
   const xmas = now.getMonth() === 11 && (now.getDate() === 24 || now.getDate() === 25);
   return xmas && clipDef('gift') ? 'gift' : 'curtsy';
 }
 
 function greetMode(period = periodOf(), clip = 'wave') {
-  const key = clip === 'gift' || clip === 'birthday' ? clip : `greet_${period}`; // 送禮、生日就說祝福
+  const key = ['gift', 'birthday', 'newyear', 'petbday', 'dragonboat', 'valentine', 'midautumn'].includes(clip) ? clip : `greet_${period}`; // 節日就說祝福
   if (!clipDef(clip)) clip = 'wave';
   const dur = clipSeconds(clip) || 2.8; // 揮手新版、提屈膝禮都是整段播一次
   return {
@@ -926,6 +958,74 @@ function drawSparks() {
     ctx.strokeStyle = `rgba(255,${200 + Math.round(55 * a)},${120 + Math.round(100 * a)},${a})`;
     ctx.lineWidth = Math.max(1, 2.2 * s.k * 2.2);
     ctx.beginPath(); ctx.moveTo(s.x, s.y); ctx.lineTo(s.x - s.vx * 0.05, s.y - s.vy * 0.05); ctx.stroke();
+  }
+  ctx.globalCompositeOperation = 'source-over';
+}
+
+// 道具消失時的光點（祐 2026-11-14）：紅包、石竹花束在影片裡是突然不見的，在那一格的道具範圍（原圖座標）灑金色光點慢慢往上飄散；花束再加粉紅花瓣
+// 兩段都是首幀小 2% 的素材（track ×1.1196、地面 694，沒有左右挪），座標換算跟仙女棒一樣，只是 dx＝0
+const MOTE_BURSTS = {
+  newyear: { at: 42, rect: [380, 252, 432, 326], n: 34 },
+  midautumn: { at: 6, rect: [410, 272, 478, 328], n: 28 },   // 5→6 月餅突然出現在手上（消失那段影片自己有金光）
+  dragonboat: { at: 41, rect: [405, 365, 505, 465], n: 34 },  // 40→41 香包突然不見
+  petbday: { at: 39, rect: [320, 215, 465, 400], n: 46, petals: 16 }, // 第二版（生日49些微瑕疵）：38→39 花束散開
+};
+const motes = [];
+let moteGlow = null;
+function emitMotes(b) {
+  const k = S.size / S.manifest.canvas;
+  const X = (x) => S.padX + (332 + (x - 384) * SPARK_S) * k + view.dx;
+  const Y = (y) => S.bubbleH + (648 - (694 - y) * SPARK_S) * k + view.dy;
+  const [x0, y0, x1, y1] = b.rect;
+  moteGlow = { x: X((x0 + x1) / 2), y: Y((y0 + y1) / 2), r: Math.min(X(x1) - X(x0), Y(y1) - Y(y0)) * 0.75, at: performance.now() };
+  const spawn = (petal) => {
+    const x = X(x0 - 8 + Math.random() * (x1 - x0 + 16)), y = Y(y0 - 8 + Math.random() * (y1 - y0 + 16));
+    const ang = -Math.PI / 2 + (Math.random() - 0.5) * 3.0, sp = (petal ? 25 : 45 + Math.random() * 80) * k;
+    motes.push({ x, y, vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp - (petal ? 0 : 25 * k), age: 0,
+      delay: Math.random() * 0.25, life: (petal ? 1.6 : 0.9) + Math.random() * 0.8, r: (petal ? 3.2 : 0.7 + Math.random() * 1.1) * k * 2.2,
+      tw: Math.random() * 6.28, petal, rot: Math.random() * 6.28, vr: (Math.random() - 0.5) * 4, k });
+  };
+  for (let i = 0; i < b.n; i++) spawn(false);
+  for (let i = 0; i < (b.petals || 0); i++) spawn(true);
+}
+function updateMotes(dt) {
+  for (let i = motes.length - 1; i >= 0; i--) {
+    const m = motes[i];
+    if (m.delay > 0) { m.delay -= dt; continue; }
+    m.age += dt;
+    if (m.age > m.life) { motes.splice(i, 1); continue; }
+    m.x += m.vx * dt; m.y += m.vy * dt; m.rot += m.vr * dt;
+    if (m.petal) { m.vy += 22 * m.k * dt; m.vx += Math.sin(m.age * 3 + m.tw) * 12 * m.k * dt; } // 花瓣慢慢飄落、左右擺
+    else { m.vx *= 0.985; m.vy *= 0.985; m.vy -= 6 * m.k * dt; }                                 // 光點慢慢往上飄
+  }
+}
+function drawMotes() {
+  const glowT = moteGlow ? (performance.now() - moteGlow.at) / 1000 : 9;
+  if (!motes.length && glowT > 0.5) return;
+  ctx.setTransform(S.dpr, 0, 0, S.dpr, 0, 0);
+  if (glowT <= 0.5) { // 消失那一下的柔光
+    const a = (1 - glowT / 0.5) * 0.45;
+    const g = ctx.createRadialGradient(moteGlow.x, moteGlow.y, 0, moteGlow.x, moteGlow.y, moteGlow.r);
+    g.addColorStop(0, `rgba(255,248,215,${a})`); g.addColorStop(0.5, `rgba(255,210,120,${a * 0.45})`); g.addColorStop(1, 'rgba(255,190,90,0)');
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(moteGlow.x, moteGlow.y, moteGlow.r, 0, Math.PI * 2); ctx.fill();
+  }
+  for (const m of motes) {
+    if (m.delay > 0) continue;
+    const u = m.age / m.life, a = u < 0.15 ? u / 0.15 : 1 - (u - 0.15) / 0.85;
+    if (m.petal) {
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.save(); ctx.translate(m.x, m.y); ctx.rotate(m.rot);
+      ctx.fillStyle = `rgba(246,150,185,${a * 0.9})`;
+      ctx.beginPath(); ctx.ellipse(0, 0, m.r * 1.3, m.r * 0.7, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+    } else {
+      ctx.globalCompositeOperation = 'lighter';
+      const tw = 0.65 + 0.35 * Math.sin(m.age * 14 + m.tw);
+      const g = ctx.createRadialGradient(m.x, m.y, 0, m.x, m.y, m.r * 2.2);
+      g.addColorStop(0, `rgba(255,253,235,${a * tw})`); g.addColorStop(0.22, `rgba(255,225,140,${a * tw * 0.8})`); g.addColorStop(0.5, `rgba(255,200,100,${a * tw * 0.18})`); g.addColorStop(1, 'rgba(255,190,80,0)');
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(m.x, m.y, m.r * 2.2, 0, Math.PI * 2); ctx.fill();
+    }
   }
   ctx.globalCompositeOperation = 'source-over';
 }
@@ -1501,8 +1601,8 @@ function claudeState() {
 
 const INTERACTIONS = new Set(['drag', 'fall', 'pat', 'happy']);
 // 撫子回覆時可以叫、而且 Claude 工作中也會先演完的短動作（長的坐下、睡覺不算，免得卡住工作狀態）
-const EMOTE_SHORT = new Set(['yawn', 'stretch', 'wave', 'cheer', 'curious', 'pose', 'happy', 'shy', 'pray', 'curtsy', 'pirouette', 'arabesque', 'nod', 'shake', 'mail', 'gift', 'birthday', 'lantern', 'sparkler']);
-const FREE = new Set(['idle', 'walk', 'fly', 'yawn', 'stretch', 'wave', 'cheer', 'curious', 'pose', 'nap', 'sit', 'perch', 'shy', 'greet', 'pray', 'doze', 'standdoze', 'curtsy', 'pirouette', 'arabesque', 'nod', 'shake', 'mail', 'gift', 'birthday', 'lantern', 'sparkler']);
+const EMOTE_SHORT = new Set(['yawn', 'stretch', 'wave', 'cheer', 'curious', 'pose', 'happy', 'shy', 'pray', 'curtsy', 'pirouette', 'arabesque', 'nod', 'shake', 'mail', 'gift', 'birthday', 'lantern', 'sparkler', 'newyear', 'petbday', 'dragonboat', 'valentine', 'midautumn']);
+const FREE = new Set(['idle', 'walk', 'fly', 'yawn', 'stretch', 'wave', 'cheer', 'curious', 'pose', 'nap', 'sit', 'perch', 'shy', 'greet', 'pray', 'doze', 'standdoze', 'curtsy', 'pirouette', 'arabesque', 'nod', 'shake', 'mail', 'gift', 'birthday', 'lantern', 'sparkler', 'newyear', 'petbday', 'dragonboat', 'valentine', 'midautumn']);
 
 function chooseFree() {
   const s = S.settings;
@@ -1567,6 +1667,7 @@ function tick(dt) {
 
   modeT += dt;
   updateSparks(dt);
+  updateMotes(dt);
   const alive = mode ? mode.update(dt, modeT) : false;
   if (!alive) {
     if (mode && mode.name === 'nap') S.lastInteraction = performance.now();

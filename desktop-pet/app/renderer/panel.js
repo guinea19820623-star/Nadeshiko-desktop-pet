@@ -33,7 +33,7 @@ const VLABEL = {
   drag: '被拎起', dizzy: '摔暈', fly: '飛行', sit: '坐下休息', wake: '睡醒', hello: '打招呼', thinking: '思考中', working: '工作中',
   waiting: '等你確認', done: '完成', error: '出錯', tired: '疲憊', exhausted: '5h 用完（睡覺）', faint: '暈倒（週上限）', perch: '坐在視窗邊緣',
   shy: '害羞', greet_morning: '早安問候', greet_noon: '中午問候', greet_afternoon: '下午問候', greet_evening: '晚上問候', greet_night: '深夜問候',
-  perch_lie: '趴在視窗上', drop: '飄落', mail: '收信', pray: '禱告', lantern: '放天燈', sparkler: '仙女棒', gift: '聖誕禮物', birthday: '生日快樂', nod: '點頭贊同', shake: '搖頭困惑',
+  perch_lie: '趴在視窗上', drop: '飄落', mail: '收信', pray: '禱告', lantern: '放天燈', sparkler: '仙女棒', gift: '聖誕禮物', birthday: '生日快樂', newyear: '新年拜年', petbday: '撫子的生日', dragonboat: '端午香包', valentine: '情人節巧克力', midautumn: '中秋賞月', nod: '點頭贊同', shake: '搖頭困惑',
 };
 let voiceData = null;   // { lines, files, url, voice, max }
 let studioAudio = null;
@@ -85,6 +85,10 @@ function render() {
   $('bmonth').value = bm;
   $('bday').value = bd;
   $('bon').checked = !!settings.birthdayOn;
+  const [pm, pd] = /^\d{2}-\d{2}$/.test(settings.petBirthday || '') ? settings.petBirthday.split('-') : ['03', '30'];
+  $('pmonth').value = pm;
+  $('pday').value = pd;
+  $('pon').checked = settings.petBirthdayOn !== false;
   for (const b of document.querySelectorAll('#toggles input')) b.checked = !!settings[b.dataset.key];
   for (const b of document.querySelectorAll('#force button')) b.classList.toggle('on', (b.dataset.key || null) === (forced || null));
 }
@@ -117,6 +121,12 @@ async function main() {
   $('bmonth').onchange = saveBirthday;
   $('bday').onchange = saveBirthday;
   $('bon').onchange = (e) => host.set('birthdayOn', e.target.checked);
+  fill($('pmonth'), 12);
+  fill($('pday'), 31);
+  const savePetBirthday = () => host.set('petBirthday', `${$('pmonth').value}-${$('pday').value}`);
+  $('pmonth').onchange = savePetBirthday;
+  $('pday').onchange = savePetBirthday;
+  $('pon').onchange = (e) => host.set('petBirthdayOn', e.target.checked);
   for (const [key, label] of TOGGLES) {
     const l = document.createElement('label');
     l.className = 'check';

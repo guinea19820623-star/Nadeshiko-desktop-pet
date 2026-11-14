@@ -33,6 +33,8 @@ const DEFAULT_SETTINGS = {
   voiceUrl: 'http://127.0.0.1:8080', // 語音工作室用的 Breeze-TTS 位置與聲音
   voiceName: 'agent_girl',
   birthday: '01-01', // 主人的生日「MM-DD」（控制面板選，預設 1 月 1 日）
+  petBirthday: '03-30', // 撫子的生日「MM-DD」（祐 2026-11-14：她 3/30 醒來；其他人可以改成與桌寵見面的日子）
+  petBirthdayOn: true,
   birthdayOn: false, // 打勾才啟用：生日那天開機、喚醒時撫子捧生日蛋糕出來（預設不開，免得每個人 1 月 1 日都收到蛋糕）
 };
 
@@ -463,7 +465,7 @@ function setupVoiceIPC() {
 }
 
 function updateSetting(key, value) {
-  if (key === 'birthday' && !/^(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(String(value))) return;
+  if ((key === 'birthday' || key === 'petBirthday') && !/^(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(String(value))) return;
   if (key === 'actMode') {
     if (!ACT_MODES.some(([k]) => k === value)) return;
     settings.random = value !== 'claude';
@@ -584,6 +586,7 @@ const ACTIONS = [
   ['pray', '禱告'], ['doze', '坐著打盹'], ['standdoze', '站著打瞌睡'], ['curtsy', '提屈膝禮'],
   ['pirouette', '芭蕾：旋轉'], ['arabesque', '芭蕾：阿拉貝斯克'],
   ['pose', '擺姿勢'], ['nod', '點頭贊同'], ['shake', '搖頭困惑'], ['mail', '收信'], ['gift', '聖誕禮物'], ['birthday', '生日快樂'], ['lantern', '放天燈'], ['sparkler', '仙女棒'],
+  ['newyear', '新年拜年'], ['petbday', '撫子的生日'], ['dragonboat', '端午香包'], ['valentine', '情人節巧克力'], ['midautumn', '中秋賞月'],
 ];
 
 // 歌曲與樂曲：檔名（去掉副檔名）就是曲名；只在使用者自己點曲子時才演出
