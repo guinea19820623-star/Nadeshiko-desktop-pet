@@ -31,6 +31,8 @@ contextBridge.exposeInMainWorld('panelHost', {
   set: (k, v) => ipcRenderer.send('panel:set', k, v),
   force: (k) => ipcRenderer.send('panel:force', k),
   action: (k) => ipcRenderer.send('panel:action', k),
+  weatherSearch: (name) => ipcRenderer.invoke('weather:search', name),
+  weatherCheck: () => ipcRenderer.invoke('weather:check'),
   simHook: (input) => ipcRenderer.send('sim:hook', input),
   simUsage: (five, week) => ipcRenderer.send('sim:usage', five, week),
   simClear: () => ipcRenderer.send('sim:clear'),

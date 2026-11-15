@@ -30,7 +30,7 @@ const slCmd = `node "${fwd(path.join(root, 'hooks', 'pet-statusline.js'))}"`;
 // 要監聽的事件。async: true → 在背景跑，完全不拖慢 Claude。
 const EVENTS = [
   'SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'PostToolUseFailure',
-  'PermissionRequest', 'Notification', 'SubagentStart', 'PreCompact', 'Stop', 'StopFailure', 'SessionEnd',
+  'PermissionRequest', 'Notification', 'SubagentStart', 'PreCompact', 'PostCompact', 'Stop', 'StopFailure', 'SessionEnd',
 ];
 
 function load() {

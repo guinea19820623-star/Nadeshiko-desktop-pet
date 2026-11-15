@@ -25,6 +25,11 @@ test('hook 事件對應', () => {
   assert.strictEqual(m({ hook_event_name: 'StopFailure', error: 'server_error' }).activity, 'error');
   assert.strictEqual(m({ hook_event_name: 'SessionEnd' }).clearSession, true);
   assert.strictEqual(m({ hook_event_name: 'CwdChanged' }), null);
+  // 壓縮：PreCompact 開始寫字；PostCompact 或壓縮後的 SessionStart（source: compact）結束，不打招呼
+  assert.strictEqual(m({ hook_event_name: 'PreCompact', trigger: 'auto' }).activity, 'compacting');
+  assert.strictEqual(m({ hook_event_name: 'PostCompact' }).activity, 'idle');
+  assert.strictEqual(m({ hook_event_name: 'SessionStart', source: 'compact' }).activity, 'idle');
+  assert.strictEqual(m({ hook_event_name: 'SessionStart', source: 'startup' }).activity, 'hello');
 });
 
 test('hook 腳本：從 stdin 讀 JSON 寫狀態檔，結束時刪掉', () => {

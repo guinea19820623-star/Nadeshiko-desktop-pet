@@ -7,7 +7,7 @@ const TOGGLES = [
   ['voice', '語音'], ['perch', '坐到視窗邊緣'], ['bubble', '頭上小字'], ['alwaysOnTop', '保持在最上層'],
 ];
 const FORCE = [
-  [null, '自動（跟 Claude 連動）'], ['free', '精神飽滿（隨機）'], ['thinking', '思考中'], ['working', '工作中'],
+  [null, '自動（跟 Claude 連動）'], ['free', '精神飽滿（隨機）'], ['thinking', '思考中'], ['working', '工作中'], ['compacting', '整理記憶'],
   ['waiting', '等你確認'], ['done', '完成'], ['hello', '打招呼'], ['error', '出錯'],
   ['tired', '疲憊'], ['exhausted', '5h 用完（睡覺）'], ['faint', '暈倒（週上限）'],
 ];
@@ -33,7 +33,7 @@ const VLABEL = {
   drag: '被拎起', dizzy: '摔暈', fly: '飛行', sit: '坐下休息', wake: '睡醒', hello: '打招呼', thinking: '思考中', working: '工作中',
   waiting: '等你確認', done: '完成', error: '出錯', tired: '疲憊', exhausted: '5h 用完（睡覺）', faint: '暈倒（週上限）', perch: '坐在視窗邊緣',
   shy: '害羞', greet_morning: '早安問候', greet_noon: '中午問候', greet_afternoon: '下午問候', greet_evening: '晚上問候', greet_night: '深夜問候',
-  perch_lie: '趴在視窗上', drop: '飄落', mail: '收信', pray: '禱告', lantern: '放天燈', sparkler: '仙女棒', gift: '聖誕禮物', birthday: '生日快樂', newyear: '新年拜年', petbday: '撫子的生日', dragonboat: '端午香包', valentine: '情人節巧克力', midautumn: '中秋賞月', nod: '點頭贊同', shake: '搖頭困惑',
+  perch_lie: '趴在視窗上', drop: '飄落', mail: '收信', pray: '禱告', lantern: '放天燈', sparkler: '仙女棒', gift: '聖誕禮物', birthday: '生日快樂', newyear: '新年拜年', petbday: '撫子的生日', dragonboat: '端午香包', valentine: '情人節巧克力', midautumn: '中秋賞月', rainy: '下雨帶傘', chilly: '天冷保暖', hot: '天熱喝水', nod: '點頭贊同', shake: '搖頭困惑',
 };
 let voiceData = null;   // { lines, files, url, voice, max }
 let studioAudio = null;
@@ -90,7 +90,44 @@ function render() {
   $('pday').value = pd;
   $('pon').checked = settings.petBirthdayOn !== false;
   for (const b of document.querySelectorAll('#toggles input')) b.checked = !!settings[b.dataset.key];
+  // 天氣提醒（輸入框正在打字時不要蓋掉）
+  $('wx-on').checked = !!settings.weatherOn;
+  $('wx-place').textContent = settings.weatherPlace ? `目前地點：${settings.weatherPlace.label}` : '還沒設定城市（搜尋後選一個）';
+  if (document.activeElement !== $('wx-times')) $('wx-times').value = settings.weatherTimes || '';
+  for (const k of ['rainAt', 'coldAt', 'hotAt']) if (document.activeElement !== $(k)) $(k).value = settings[k];
+  const wl = settings.weatherLast;
+  $('wx-last').textContent = wl ? `${new Date(wl.at).toLocaleString()}　${wl.text}${wl.kind ? `→ ${WX_LABEL[wl.kind]}` : '→ 不用提醒'}` : '';
   for (const b of document.querySelectorAll('#force button')) b.classList.toggle('on', (b.dataset.key || null) === (forced || null));
+}
+
+const WX_LABEL = { rainy: '下雨帶傘', chilly: '天冷保暖', hot: '天熱喝水' };
+
+function bindWeather() {
+  $('wx-on').onchange = (e) => host.set('weatherOn', e.target.checked);
+  let found = [];
+  const find = async () => {
+    const q = $('wx-q').value.trim();
+    if (!q) return;
+    $('wx-place').textContent = '搜尋中…';
+    const r = await host.weatherSearch(q);
+    found = r.list || [];
+    if (r.error || !found.length) { $('wx-place').textContent = r.error ? `搜尋失敗（${r.error}）` : '找不到這個地方，換個寫法試試（中文、英文都可以）'; return; }
+    const sel = $('wx-pick');
+    sel.innerHTML = '';
+    found.forEach((p, i) => { const o = document.createElement('option'); o.value = i; o.textContent = p.label; sel.appendChild(o); });
+    $('wx-pick-row').hidden = found.length < 2;
+    host.set('weatherPlace', { label: found[0].label, lat: found[0].lat, lon: found[0].lon });
+  };
+  $('wx-find').onclick = find;
+  $('wx-q').onkeydown = (e) => { if (e.key === 'Enter') find(); };
+  $('wx-pick').onchange = (e) => { const p = found[Number(e.target.value)]; if (p) host.set('weatherPlace', { label: p.label, lat: p.lat, lon: p.lon }); };
+  $('wx-times').onchange = (e) => host.set('weatherTimes', e.target.value);
+  for (const k of ['rainAt', 'coldAt', 'hotAt']) $(k).onchange = (e) => host.set(k, Number(e.target.value));
+  $('wx-check').onclick = async () => {
+    $('wx-last').textContent = '查詢中…';
+    const r = await host.weatherCheck();
+    if (r.error) $('wx-last').textContent = r.error;
+  };
 }
 
 async function main() {
@@ -110,6 +147,7 @@ async function main() {
   $('dir').textContent = `狀態資料夾：${init.stateDir}`;
 
   $('actMode').onchange = (e) => host.set('actMode', e.target.value);
+  bindWeather();
   // 主人的生日：月、日兩個下拉選單（預設 1 月 1 日，選了就存 MM-DD），「啟用」打勾才會在生日那天捧蛋糕
   const fill = (sel, n) => {
     sel.innerHTML = '';

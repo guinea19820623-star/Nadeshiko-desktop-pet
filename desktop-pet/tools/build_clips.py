@@ -370,6 +370,24 @@ CLIPS = [
     # 中秋49（2026-11-15）：3–5 雙手捧到胸前、手心微微發光；6 月餅突然出現（pet.js 補光點）；6–40 捧著月餅、抬頭賞月、看你微笑；
     #   41–44 月餅在影片裡就化成金光；45–47 回站姿
     dict(no=97, src='中秋49', key='midautumn', anchor='track', track=[(1, 1.1196)], ground_src=694, match=1, once=True, range=(1, 47)),
+    # 壓縮49（2026-11-15，Claude 整理記憶時）：2–5 金光中出現白金色的書、打開；6–9 白羽毛筆飛到右手；10–35 低頭寫字；
+    #   36–38 收筆闔書；39–42 書化成金光；43–46 雙手放胸前、閉眼微笑；47–49 站好。
+    #   進場 1→22、寫字 22–33 來回（逐區量過：頭、髮尾最穩，筆有在動）、退場從當下那格播到 49（壓縮多久就寫多久）
+    dict(no=98, src='壓縮49', key='compactall', anchor='track', track=[(1, 1.1196)], ground_src=694, match=1, once=True, register=False,
+         derive=[dict(key='compactdown', seq=(1, 22)),
+                 dict(key='compactloop', seq=[(22, 33), (32, 23)], loop=True, xfade=0.1, speed=0.8),
+                 dict(key='compactup', seq=(22, 49))]),
+    # 下雨：記得帶傘49（2026-11-15，祐選了白色蘿莉塔蕾絲傘）：2 金光聚起；3–7 傘在身前撐開；8 舉到頭上；9–10 斜靠肩上；
+    #   11–27 撐傘、抬頭看雨、對你笑；28–30 舉高；31–33 收到身前；34–41 傘化成金光；42 站好。
+    #   2、8、9、10、28、29、30 傘面超出影片上緣：tools/patches/make_rain49.py 從傘面完整的格借傘面補上（補圖往上多留 140px）；
+    #   祐 2026-11-15：人物大小不變，補好的傘面接上，畫布往上多留 100px（headroom），借用頭上字幕那條空間把整把傘畫出來
+    dict(no=99, src='下雨：記得帶傘49', key='rainy', anchor='track', track=[(1, 1.1196)], ground_src=694, match=1, once=True, range=(1, 45), headroom=100, side=40, preprocess='patches/fix_rain49_alpha.py',   # 37–40 傘身中間被去背摳成半透明（發黑），補成不透明
+         replace={n: f'patches/rain49_f{n:02d}.png' for n in (2, 8, 9, 10, 28, 29, 30)}),
+    # 氣溫偏低：出門記得保暖49（2026-11-15）：1–11 抱著手臂發抖；12–19 金光中出現米白針織圍巾、圍上；20–33 圍著圍巾、對手心哈氣；
+    #   33–39 圍巾化成金光；40–49 雙手合在胸前微笑
+    dict(no=100, src='氣溫偏低：出門記得保暖49', key='chilly', anchor='track', track=[(1, 1.1196)], ground_src=694, match=1, once=True),
+    # 氣溫偏高：記得補充水分49（2026-11-15）：3–6 用手搧風；7–15 金光中出現水瓶；16–28 喝水；31–35 金光；36–49 捧著水微笑、站好
+    dict(no=101, src='氣溫偏高：記得補充水分49', key='hot', anchor='track', track=[(1, 1.1196)], ground_src=694, match=1, once=True),
     # 收信（2026-11-10，49 格，鏡頭不動）：信封飄下 → 接住拆封 → 讀信 → 信淡出 → 回站姿；40 之後靜止
     # 新的暈倒＋起身49（2026-11-14，取代昏倒2 側躺；祐：週上限躺平跟蓋棉被睡覺太像）：從站姿開始，首幀比其他 49 格小 2%（同飛行49）
     #   1–8 頭暈扶額、腿軟坐倒；9–15 側坐垂頭；16–25 閉眼昏迷；26–35 頭更低、手撐地；36–38 站起（37 動態模糊，放慢）；39–49 站好
@@ -480,8 +498,11 @@ def main():
             pre = importlib.util.module_from_spec(spec); spec.loader.exec_module(pre)
             frames = pre.fix(frames)
         # replace：{格序: 圖檔}，整格換成修補好的圖（原圖座標 768×768）
+        #   補圖比 768 高的，多出來的是「往上留白」（影片上緣以外補畫的東西，例如舉高的傘），擺放時往上移回去
+        pads = [0] * n
         for fi, rfile in c.get('replace', {}).items():
             frames[fi - 1] = Image.open(os.path.join(os.path.dirname(os.path.abspath(__file__)), rfile)).convert('RGBA')
+            pads[fi - 1] = frames[fi - 1].height - 768
         tag = f"{c['no']:02d}_{c.get('name', label)}"
         # ① 切格原圖：768 原尺寸、編號，給祐之後做首尾幀用
         if args.raw:
@@ -501,6 +522,7 @@ def main():
         # 只用祐標出能用的那幾格；之後的格序都扣掉 r0（檔名仍用原本的編號）
         r0, r1 = c.get('range', (1, n))
         frames, durs, n = frames[r0 - 1:r1], durs[r0 - 1:r1], r1 - r0 + 1
+        pads = pads[r0 - 1:r1]
         # shift：{格序: (dx, dy)} 原圖像素，逐格平移（影片裡人慢慢飄走時，把臉拉回同一個位置）
         for fi, (dx, dy) in c.get('shift', {}).items():
             im = frames[fi - r0]
@@ -566,24 +588,29 @@ def main():
                 if 'top_min' in c and oy + bi[1] * s < c['top_min']:   # 跳太高會出畫布：這格往下挪到剛好不出去
                     oy = c['top_min'] - bi[1] * s
             xf.append((ox, oy, s))
-            scaled = im.resize((sz, sz), Image.LANCZOS)
+            pad = pads[i - r0]
+            scaled = im.resize((sz, int(round(im.height * s))), Image.LANCZOS)
             # 位移可能是負的（alpha_composite 不收負座標），先放到比較大的暫存畫布再裁回 660
             big = Image.new('RGBA', (CANVAS + 2 * sz, CANVAS + 2 * sz), (0, 0, 0, 0))
             # stabilize：影片裡人一路往下飄的，逐格把外框中心拉回同一個高度（往下移交給程式），循環接縫才不會跳
             sy = (cy_m - (bbs[i - r0][1] + bbs[i - r0][3]) / 2) * s if c.get('stabilize') else 0
-            big.alpha_composite(scaled, (sz + int(round(ox)), sz + int(round(oy + sy))))
-            canvas = big.crop((sz, sz, sz + CANVAS, sz + CANVAS))
+            big.alpha_composite(scaled, (sz + int(round(ox)), sz + int(round(oy + sy - pad * s))))
+            # headroom：畫布往上多留幾 px、side：左右各多留幾 px（撐開的大傘這類），輸出 (660+2side)×(660+headroom)；
+            #   桌寵照圖的實際大小畫，往上借用頭上字幕那條空間、往左右借用視窗兩側的空白
+            hr, sd = c.get('headroom', 0), c.get('side', 0)
+            canvas = big.crop((sz - sd, sz - hr, sz + CANVAS + sd, sz + CANVAS))
             b = bbox(canvas)
             if b is None:
-                b = (0, 0, 1, 1)
-            if b[0] <= 0 or b[2] >= CANVAS or b[1] <= 0 or b[3] >= CANVAS:
+                b = (sd, hr, sd + 1, hr + 1)
+            b = (b[0] - sd, b[1] - hr, b[2] - sd, b[3] - hr)   # manifest 的外框、頭頂一律用 660 畫布的座標（超出去的是負數）
+            if b[0] <= -sd or b[2] >= CANVAS + sd or b[1] <= -hr or b[3] >= CANVAS:
                 overflow += 1
             name = f"{c['key']}_{i:02d}.webp"
             if c.get('wired', True):
                 canvas.save(os.path.join(cdir, name), 'WEBP', quality=92, alpha_quality=100, method=6)
             files.append(name)
             boxes.append(list(b))
-            heads.append([round(head_x(canvas, b[1])), b[1]])
+            heads.append([round(head_x(canvas, b[1] + hr)) - sd, b[1]])
             for sp, fi in c.get('sprites', {}).items():
                 if fi == i and c.get('wired', True):
                     canvas.save(os.path.join(sdir, f'{sp}.png'), optimize=True)
@@ -591,6 +618,8 @@ def main():
                     if seat is not None: man['sprites'][sp]['seat'] = seat
 
         entry = dict(frames=files, bbox=boxes, head=heads, durations=[round(d, 4) for d in durs], label=label)
+        if c.get('headroom'): entry['top'] = c['headroom']
+        if c.get('side'): entry['side'] = c['side']
         if c.get('once'):
             entry['mode'] = 'once'
         else:

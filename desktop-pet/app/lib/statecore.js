@@ -16,11 +16,12 @@
   };
 
   // 活動優先序：越前面越重要（多個 Claude Code 視窗同時開時取最高）
-  const ACTIVITY_ORDER = ['working', 'thinking', 'waiting', 'done', 'error', 'hello', 'idle'];
+  const ACTIVITY_ORDER = ['compacting', 'working', 'thinking', 'waiting', 'done', 'error', 'hello', 'idle'];
 
   function freshActivity(s, now, o) {
     const age = now - (s.ts || 0);
     switch (s.activity) {
+      case 'compacting':
       case 'working':
       case 'thinking':
         return age < o.staleWorkMs ? s.activity : 'idle';
@@ -136,6 +137,8 @@
         return r.tool ? `工作中 · ${r.tool}` : '工作中…';
       case 'thinking':
         return '思考中…';
+      case 'compacting':
+        return '整理記憶中…';
       case 'waiting':
         return '需要你確認一下～';
       case 'done':
@@ -150,10 +153,13 @@
   }
 
   // 視窗版面：左右各留一段透明邊，讓頭上的泡泡有地方跟著頭移動、靠邊時往內閃
-  const BUBBLE_H = 52;
+  // 視窗上方留給頭上小字的高度。2026-11-15 祐：視窗稍微加高——舉高的蕾絲傘這類動作會往上畫進這條空間（最多 100 單位，660 畫布），
+  // 所以至少 60px，大尺寸時跟著放大（size×0.17 ≈ 112 單位）
+  const BUBBLE_H = 60;
   function layout(size) {
     const padX = Math.max(40, Math.round(size * 0.25));
-    return { padX, bubbleH: BUBBLE_H, width: size + padX * 2, height: size + BUBBLE_H };
+    const bubbleH = Math.max(BUBBLE_H, Math.round(size * 0.17));
+    return { padX, bubbleH, width: size + padX * 2, height: size + bubbleH };
   }
 
   const api = { DEFAULTS, resolve, bubbleText, fmtReset, layout };

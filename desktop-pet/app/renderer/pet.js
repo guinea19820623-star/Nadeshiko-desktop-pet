@@ -21,13 +21,13 @@ const ACTION_LINES = {
   curious: '嗯？', pose: '♪', happy: '嘿嘿♪', pat: '再摸一下嘛…', drag: '哇！放我下來～', dizzy: '暈…',
   pray: '願一切順利～', doze: 'Zzz…', curtsy: '日安～', pirouette: '轉一圈～', arabesque: '♪～',
   nod: '嗯嗯！', shake: '唔…不對吧？', mail: '有信來囉～', gift: '聖誕快樂～', birthday: '生日快樂～', lantern: '願望會實現的～', sparkler: '好漂亮～',
-  newyear: '新年快樂～', petbday: '謝謝你遇見我～', dragonboat: '端午節快樂～', valentine: '情人節快樂…', midautumn: '中秋節快樂～',
+  newyear: '新年快樂～', petbday: '謝謝你遇見我～', dragonboat: '端午節快樂～', valentine: '情人節快樂…', midautumn: '中秋節快樂～', rainy: '記得帶傘喔～', chilly: '天冷了，記得保暖～', hot: '天熱了，記得多喝水～',
 };
 
 const S = {
   settings: null,
   manifest: null,
-  bubbleH: 52,
+  bubbleH: 60,
   padX: 40,
   snapshot: null,
   forced: null,
@@ -69,7 +69,7 @@ const onGround = () => Math.abs(S.pos.y - groundY()) < 2;
 
 // ---------- 語音 ----------
 const VOICE_DIR = '../voice/';
-const VOICE_COOLDOWN = { thinking: 60000, working: 60000, tired: 120000, exhausted: 120000, faint: 120000, nap: 30000, sit: 30000, perch: 30000, perch_lie: 30000, drop: 20000, shy: 8000 };
+const VOICE_COOLDOWN = { thinking: 60000, working: 60000, compacting: 60000, tired: 120000, exhausted: 120000, faint: 120000, nap: 30000, sit: 30000, perch: 30000, perch_lie: 30000, drop: 20000, shy: 8000 };
 let audioCache = {};
 let voiceVer = 0; // 語音工作室換了音檔後加一，避免讀到舊的快取
 let nowPlaying = null;
@@ -206,16 +206,18 @@ function ensureClip(name) {
   clipRes[name] = res;
   const gen = bitmapGen;
   const px = Math.round(S.size * S.dpr);
+  const cv = S.manifest.canvas;
+  const pw = Math.round(px * (cv + 2 * (def.side || 0)) / cv), ph = Math.round(px * (cv + (def.top || 0)) / cv);
   Promise.all(def.frames.map(async (file, i) => {
     // 不走 imageCache：片段會被丟掉重載，不要讓原圖永遠留在記憶體裡
     const img = await new Promise((res, rej) => { const im = new Image(); im.onload = () => res(im); im.onerror = rej; im.src = `../sprites/clips/${file}`; });
-    return [i, await createImageBitmap(img, { resizeWidth: px, resizeHeight: px, resizeQuality: 'high' })];
+    return [i, await createImageBitmap(img, { resizeWidth: pw, resizeHeight: ph, resizeQuality: 'high' })];
   })).then((list) => {
     if (gen !== bitmapGen || clipRes[name] !== res) { for (const [, b] of list) b.close(); return; }
     for (const [i, bmp] of list) {
       const k = clipKey(name, i);
       S.bitmaps[k] = bmp;
-      S.clipInfo[k] = { bbox: def.bbox[i], head: def.head[i] };
+      S.clipInfo[k] = { bbox: def.bbox[i], head: def.head[i], top: def.top || 0, side: def.side || 0 };
       res.keys.push(k);
     }
     res.state = 'ready';
@@ -286,7 +288,7 @@ function draw() {
   ctx.rotate(view.rot);
   ctx.scale(view.sx * (view.flip ? -1 : 1), view.sy);
   ctx.translate(-px, -py);
-  ctx.drawImage(bmp, S.padX, S.bubbleH, S.size, S.size);
+  drawFrame(bmp, view.sprite);
   const nb = view.blend && view.blend.a > 0.01 && S.bitmaps[view.blend.sprite];
   if (nb) {
     // 淡入的那張可以有自己的左右方向（影片走路往右時是鏡像，停下來淡回正面站姿時不要鏡像）
@@ -294,11 +296,21 @@ function draw() {
       ctx.translate(px, py); ctx.scale(-1, 1); ctx.translate(-px, -py);
     }
     ctx.globalAlpha = Math.min(1, view.blend.a);
-    ctx.drawImage(nb, S.padX, S.bubbleH, S.size, S.size);
+    drawFrame(nb, view.blend.sprite);
     ctx.globalAlpha = 1;
   }
   drawSparks();
   drawMotes();
+}
+
+// 一格畫到視窗上。片段格可以比 660 畫布大（manifest 的 top／side：往上、往左右多留的空間，例如舉高、撐開的蕾絲傘），
+// 多出來的部分畫進頭上字幕那條空間和視窗兩側的空白
+function drawFrame(bmp, key) {
+  const inf = S.clipInfo[key];
+  if (!inf || (!inf.top && !inf.side)) { ctx.drawImage(bmp, S.padX, S.bubbleH, S.size, S.size); return; }
+  const k = S.size / S.manifest.canvas;
+  const top = (inf.top || 0) * k, side = (inf.side || 0) * k;
+  ctx.drawImage(bmp, S.padX - side, S.bubbleH - top, S.size + 2 * side, S.size + top);
 }
 
 // 目前畫出來的頭頂在哪（視窗內座標），泡泡跟著它
@@ -413,7 +425,7 @@ function idleMode(duration = rand(5, 12), sprite = 'idle') {
 
 // 動作 → 動畫片段（manifest.clips）。東張西望有正面與側身兩種，在 poseMode 裡隨機挑
 // 歡呼：Claude 完成時用循環版 cheer，自己歡呼整段播一次 cheerall（最後放下手回站姿）
-const POSE_CLIP = { yawn: 'yawn', stretch: 'stretch', wave: 'wave', cheer: 'cheerall', nap: 'sleep', pose: 'pose', shy: 'shy', happy: 'happy', curtsy: 'curtsy', pirouette: 'pirouette', arabesque: 'arabesque', nod: 'nod', shake: 'shake', mail: 'mail', gift: 'gift', birthday: 'birthday', lantern: 'lantern', sparkler: 'sparkler', newyear: 'newyear', petbday: 'petbday', dragonboat: 'dragonboat', valentine: 'valentine', midautumn: 'midautumn' };
+const POSE_CLIP = { yawn: 'yawn', stretch: 'stretch', wave: 'wave', cheer: 'cheerall', nap: 'sleep', pose: 'pose', shy: 'shy', happy: 'happy', curtsy: 'curtsy', pirouette: 'pirouette', arabesque: 'arabesque', nod: 'nod', shake: 'shake', mail: 'mail', gift: 'gift', birthday: 'birthday', lantern: 'lantern', sparkler: 'sparkler', newyear: 'newyear', petbday: 'petbday', dragonboat: 'dragonboat', valentine: 'valentine', midautumn: 'midautumn', rainy: 'rainy', chilly: 'chilly', hot: 'hot' };
 
 // 定點姿勢（打哈欠、伸懶腰、揮手…）
 function poseMode(kind, duration) {
@@ -442,6 +454,9 @@ function poseMode(kind, duration) {
     dragonboat: { sprite: 'idle', dur: 4.5 },
     valentine: { sprite: 'idle', dur: 4.2 },
     midautumn: { sprite: 'idle', dur: 4.8 },
+    rainy: { sprite: 'idle', dur: 4.6 },   // 下雨記得帶傘（白色蕾絲傘，祐 2026-11-15）
+    chilly: { sprite: 'idle', dur: 5.0 },  // 氣溫偏低：圍上圍巾、對手心哈氣
+    hot: { sprite: 'idle', dur: 5.0 },     // 氣溫偏高：搧風、喝水
   }[kind];
   // 有動畫片段就播片段，沒有（或還沒載好）退回舊的單張圖加程式動作
   const clip = kind === 'curious' ? 'curious' : POSE_CLIP[kind]; // 東張西望只留 49 格正面版（祐 2026-11-12）
@@ -966,6 +981,8 @@ function drawSparks() {
 // 兩段都是首幀小 2% 的素材（track ×1.1196、地面 694，沒有左右挪），座標換算跟仙女棒一樣，只是 dx＝0
 const MOTE_BURSTS = {
   newyear: { at: 42, rect: [380, 252, 432, 326], n: 34 },
+  // 氣溫偏高：第 4 格杯子突然出現在伸出去的左手、第 38→39 格在胸前突然不見，提早在第 38 格灑在杯子上，看起來是化掉的（祐 2026-11-15：出現、消失都要光點）
+  hot: [{ at: 4, rect: [150, 305, 210, 355], n: 24 }, { at: 38, rect: [362, 245, 424, 350], n: 46 }],
   midautumn: { at: 6, rect: [410, 272, 478, 328], n: 28 },   // 5→6 月餅突然出現在手上（消失那段影片自己有金光）
   dragonboat: { at: 41, rect: [405, 365, 505, 465], n: 34 },  // 40→41 香包突然不見
   petbday: { at: 39, rect: [320, 215, 465, 400], n: 46, petals: 16 }, // 第二版（生日49些微瑕疵）：38→39 花束散開
@@ -1313,6 +1330,7 @@ const CLAUDE_CLIP = { thinking: 'think', working: 'work', waiting: 'waitwave', h
 // 49 格新版（有進場、循環、退場）：進場播一次、循環反覆，狀態一變先從當下那格播退場回站姿（跟坐姿同一套 riseMode）
 const CLAUDE_SEQ = {
   working: { down: 'workdown', loop: 'workloop', rise: 'workup' },
+  compacting: { down: 'compactdown', loop: 'compactloop', rise: 'compactup' }, // 壓縮（整理記憶）：開書 → 寫字 → 闔書化光（祐 2026-11-15）
   error: { down: 'errdown', loop: 'errloop', rise: 'errup' },
   thinking: { down: 'thinkdown', loop: 'thinkloop', rise: 'thinkup' },
   waiting: { down: 'waitdown', loop: 'waitloop', rise: 'waitup' },
@@ -1594,15 +1612,15 @@ function claudeState() {
   });
   if (S.forced) {
     r.body = S.forced;
-    if (['thinking', 'working', 'waiting', 'done', 'hello', 'error'].includes(S.forced)) r.activity = S.forced;
+    if (['thinking', 'working', 'compacting', 'waiting', 'done', 'hello', 'error'].includes(S.forced)) r.activity = S.forced;
   }
   return r;
 }
 
 const INTERACTIONS = new Set(['drag', 'fall', 'pat', 'happy']);
 // 撫子回覆時可以叫、而且 Claude 工作中也會先演完的短動作（長的坐下、睡覺不算，免得卡住工作狀態）
-const EMOTE_SHORT = new Set(['yawn', 'stretch', 'wave', 'cheer', 'curious', 'pose', 'happy', 'shy', 'pray', 'curtsy', 'pirouette', 'arabesque', 'nod', 'shake', 'mail', 'gift', 'birthday', 'lantern', 'sparkler', 'newyear', 'petbday', 'dragonboat', 'valentine', 'midautumn']);
-const FREE = new Set(['idle', 'walk', 'fly', 'yawn', 'stretch', 'wave', 'cheer', 'curious', 'pose', 'nap', 'sit', 'perch', 'shy', 'greet', 'pray', 'doze', 'standdoze', 'curtsy', 'pirouette', 'arabesque', 'nod', 'shake', 'mail', 'gift', 'birthday', 'lantern', 'sparkler', 'newyear', 'petbday', 'dragonboat', 'valentine', 'midautumn']);
+const EMOTE_SHORT = new Set(['yawn', 'stretch', 'wave', 'cheer', 'curious', 'pose', 'happy', 'shy', 'pray', 'curtsy', 'pirouette', 'arabesque', 'nod', 'shake', 'mail', 'gift', 'birthday', 'lantern', 'sparkler', 'newyear', 'petbday', 'dragonboat', 'valentine', 'midautumn', 'rainy', 'chilly', 'hot']);
+const FREE = new Set(['idle', 'walk', 'fly', 'yawn', 'stretch', 'wave', 'cheer', 'curious', 'pose', 'nap', 'sit', 'perch', 'shy', 'greet', 'pray', 'doze', 'standdoze', 'curtsy', 'pirouette', 'arabesque', 'nod', 'shake', 'mail', 'gift', 'birthday', 'lantern', 'sparkler', 'newyear', 'petbday', 'dragonboat', 'valentine', 'midautumn', 'rainy', 'chilly', 'hot']);
 
 function chooseFree() {
   const s = S.settings;
@@ -1694,7 +1712,7 @@ function updateBubble(r) {
   bubbleEl.classList.toggle('hidden', !visible);
   if (!visible) return; // 淡出時保留舊字，不會閃出空白泡泡
   // 思考/工作時，句尾的「…」改成會動的點點
-  const dots = text.endsWith('…') && (r.body === 'thinking' || r.body === 'working');
+  const dots = text.endsWith('…') && (r.body === 'thinking' || r.body === 'working' || r.body === 'compacting');
   if (dots) text = text.slice(0, -1);
   if (bubbleText.textContent !== text) bubbleText.textContent = text;
   bubbleText.classList.toggle('dots', dots);

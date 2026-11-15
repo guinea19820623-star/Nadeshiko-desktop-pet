@@ -53,15 +53,20 @@ function mapHookEvent(input) {
   const ev = input.hook_event_name;
   switch (ev) {
     case 'SessionStart':
-      return { activity: 'hello' };
+      // 壓縮完 Claude Code 會再送一次 SessionStart（source: compact）：當作「整理完了」，回到平常狀態，不再打招呼
+      return input.source === 'compact' ? { activity: 'idle' } : { activity: 'hello' };
     case 'UserPromptSubmit':
       return { activity: 'thinking' };
     case 'PreToolUse':
     case 'PostToolUse':
     case 'PostToolUseFailure':
     case 'SubagentStart':
+      return { activity: 'working', tool: input.tool_name || input.agent_type };
+    // 壓縮（整理記憶）：祐 2026-11-15 做了專屬動作——金光中出現書，用白羽毛筆寫字，寫完闔書化成光點
     case 'PreCompact':
-      return { activity: 'working', tool: input.tool_name || (ev === 'PreCompact' ? '整理記憶' : input.agent_type) };
+      return { activity: 'compacting' };
+    case 'PostCompact':
+      return { activity: 'idle' };
     case 'PermissionRequest':
       return { activity: 'waiting', tool: input.tool_name };
     case 'Notification': {

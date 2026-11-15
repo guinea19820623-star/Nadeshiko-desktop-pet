@@ -40,6 +40,11 @@
   .vline { border-top: 1px dashed var(--line); padding-top: 8px; margin-top: 8px; }
   .vline:first-of-type { border-top: 0; padding-top: 0; margin-top: 4px; }
   .vline h3 { margin: 0 0 4px; font-size: 12px; color: var(--muted); }
+  .wx input[type=text], .wx input[type=number] { border: 1px solid var(--line); background: var(--chip); color: var(--ink);
+    border-radius: 5px; padding: 4px 6px; font: inherit; user-select: text; -webkit-user-select: text; }
+  .wx input[type=text] { flex: 2 1 auto; min-width: 0; }
+  .wx input[type=number] { width: 4.2em; }
+  .wx button { flex: 0 0 auto; white-space: nowrap; }
   .vline input[type=text], #v-url, #v-name, select { width: 100%; border: 1px solid var(--line); background: var(--chip); color: var(--ink);
     border-radius: 5px; padding: 4px 6px; font: inherit; user-select: text; -webkit-user-select: text; }
   .vline .f { display: grid; grid-template-columns: 4.2em 1fr; gap: 4px 6px; align-items: center; margin: 3px 0; }
@@ -76,6 +81,20 @@
     <div class="row"><label for="pmonth" title="撫子 3 月 30 日醒來；也可以改成你們第一次見面的日子">撫子的生日</label><span style="display:flex;align-items:center;gap:6px"><select id="pmonth" style="width:auto;flex:0 0 auto"></select>月<select id="pday" style="width:auto;flex:0 0 auto"></select>日<label class="check" style="margin-left:8px"><input type="checkbox" id="pon"> 啟用</label></span></div>
     <p class="hint">選好月、日並勾「啟用」，生日那天開機或喚醒時，撫子會捧著蛋糕祝你生日快樂（12 月 24、25 日是送聖誕禮物）。不想要就取消勾選。</p>
     <div class="grid" id="toggles"></div>
+  </section>
+
+  <section class="wx">
+    <h2>天氣提醒</h2>
+    <div class="row"><label class="check"><input type="checkbox" id="wx-on"> 啟用（到了提醒時間，查接下來 12 小時的天氣）</label></div>
+    <div class="row"><label for="wx-q">城市</label><input type="text" id="wx-q" placeholder="例如：桃園、Tokyo、London"><button id="wx-find">搜尋</button></div>
+    <div class="row" id="wx-pick-row" hidden><label for="wx-pick">選一個</label><select id="wx-pick"></select></div>
+    <p class="hint" id="wx-place"></p>
+    <div class="row"><label for="wx-times">提醒時間</label><input type="text" id="wx-times" placeholder="07:30（可以填好幾個，用逗號隔開）"></div>
+    <div class="row"><label>下雨帶傘：降雨機率 ≥</label><input type="number" id="rainAt" min="10" max="100" step="5">%</div>
+    <div class="row"><label>天冷保暖：最低溫 ≤</label><input type="number" id="coldAt" min="-30" max="30" step="1">°C</div>
+    <div class="row"><label>天熱喝水：最高溫 ≥</label><input type="number" id="hotAt" min="15" max="50" step="1">°C</div>
+    <div class="row"><button id="wx-check">現在查一次</button><span class="hint" id="wx-last" style="margin:0"></span></div>
+    <p class="hint">同名的地方很多時會列出來讓你選；中文找不到或找錯，就改用英文（例如 Tainan、Hsinchu）。提醒時間建議填出門前一小時。下雨優先；沒有雨再看冷熱。只會送出城市的經緯度，查不到天氣時就不提醒。天氣資料：Open-Meteo.com</p>
   </section>
 
   <section>

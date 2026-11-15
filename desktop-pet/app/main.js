@@ -7,6 +7,7 @@ const fs = require('fs');
 const path = require('path');
 const bridge = require('./lib/bridge');
 const { layout } = require('./lib/statecore');
+const weather = require('./lib/weather');
 
 const BUBBLE_H = layout(250).bubbleH; // 視窗上方留給頭上小字的高度
 const SIZE_MIN = 100;
@@ -36,6 +37,15 @@ const DEFAULT_SETTINGS = {
   petBirthday: '03-30', // 撫子的生日「MM-DD」（祐 2026-11-14：她 3/30 醒來；其他人可以改成與桌寵見面的日子）
   petBirthdayOn: true,
   birthdayOn: false, // 打勾才啟用：生日那天開機、喚醒時撫子捧生日蛋糕出來（預設不開，免得每個人 1 月 1 日都收到蛋糕）
+  // 天氣提醒（2026-11-15）：設定城市後，在提醒時間查接下來 12 小時，下雨帶傘 ＞ 天冷保暖 ＞ 天熱喝水
+  weatherOn: false,
+  weatherPlace: null,      // { label, lat, lon }：控制面板搜尋城市後選的
+  weatherTimes: '07:30',   // 可以填好幾個，例如「07:00, 15:00, 23:00」（出門前一小時）
+  rainAt: 60,              // 降雨機率 ≥ 這個 % 就提醒帶傘
+  coldAt: 15,              // 最低溫 ≤ 這個 °C 提醒保暖
+  hotAt: 32,               // 最高溫 ≥ 這個 °C 提醒喝水
+  weatherFired: {},        // 每個時段今天提醒過了沒（重開不會再提醒一次）
+  weatherLast: null,       // 最近一次查詢的結果，控制面板顯示
 };
 
 let settings = { ...DEFAULT_SETTINGS };
@@ -95,6 +105,9 @@ function createPet() {
   const primary = screen.getPrimaryDisplay().workArea;
   let x = settings.x;
   let y = settings.y;
+  // 記住的是視窗左上角；視窗高度變了（2026-11-15 頭上空間 52 → 至少 60）就照舊高度換算，腳底才會在同一個地方
+  const savedH = settings.winH || settings.size + 52;
+  if (y != null && savedH !== height) y += savedH - height;
   // 記住的位置不在任何螢幕內（例如拔掉外接螢幕）就回到主螢幕右下
   const visible = x != null && screen.getAllDisplays().some((d) => {
     const w = d.workArea;
@@ -465,6 +478,9 @@ function setupVoiceIPC() {
 }
 
 function updateSetting(key, value) {
+  if (key === 'weatherTimes') value = weather.parseTimes(value).join(', ');
+  if (['rainAt', 'coldAt', 'hotAt'].includes(key)) { value = Number(value); if (!Number.isFinite(value)) return; }
+  if (key === 'weatherPlace' && value != null && !(Number.isFinite(value.lat) && Number.isFinite(value.lon))) return;
   if ((key === 'birthday' || key === 'petBirthday') && !/^(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(String(value))) return;
   if (key === 'actMode') {
     if (!ACT_MODES.some(([k]) => k === value)) return;
@@ -475,6 +491,35 @@ function updateSetting(key, value) {
   if (key === 'size') return setSize(value);
   saveSettingsSoon();
   broadcastSettings();
+}
+
+// ---------- 天氣提醒 ----------
+// 每分鐘看一次：到了提醒時間（電腦睡著的話醒來 30 分鐘內補），今天這個時段還沒提醒過，就查天氣、演對應的動作
+async function checkWeather(show) {
+  const p = settings.weatherPlace;
+  if (!p) return { error: '還沒設定城市' };
+  let r;
+  try {
+    r = weather.decide(await weather.forecast(p.lat, p.lon), settings);
+  } catch (e) {
+    return { error: `查不到天氣（${e.message}）` };
+  }
+  const text = weather.summary(r);
+  settings.weatherLast = { at: new Date().toISOString(), text, kind: r ? r.kind : null };
+  saveSettingsSoon();
+  broadcastSettings();
+  if (r && r.kind && show) send('pet:action', r.kind);
+  return { text, kind: r ? r.kind : null };
+}
+
+async function weatherTick() {
+  if (!settings.weatherOn || !settings.weatherPlace) return;
+  const now = new Date();
+  const slot = weather.dueSlot(weather.parseTimes(settings.weatherTimes), now, settings.weatherFired || {});
+  if (!slot) return;
+  settings.weatherFired = { ...(settings.weatherFired || {}), [slot]: weather.dayKey(now) };
+  saveSettingsSoon();
+  await checkWeather(true);
 }
 
 // 「保持在最上層」：用最高的層級（screen-saver），瀏覽器或影片全螢幕時才比較不會被蓋住；
@@ -572,6 +617,7 @@ const TEST_STATES = [
   ['free', '精神飽滿（隨機行為）'],
   ['thinking', '思考中'],
   ['working', '工作中'],
+  ['compacting', '整理記憶（壓縮）'],
   ['waiting', '等你確認'],
   ['done', '完成'],
   ['hello', '打招呼'],
@@ -586,7 +632,7 @@ const ACTIONS = [
   ['pray', '禱告'], ['doze', '坐著打盹'], ['standdoze', '站著打瞌睡'], ['curtsy', '提屈膝禮'],
   ['pirouette', '芭蕾：旋轉'], ['arabesque', '芭蕾：阿拉貝斯克'],
   ['pose', '擺姿勢'], ['nod', '點頭贊同'], ['shake', '搖頭困惑'], ['mail', '收信'], ['gift', '聖誕禮物'], ['birthday', '生日快樂'], ['lantern', '放天燈'], ['sparkler', '仙女棒'],
-  ['newyear', '新年拜年'], ['petbday', '撫子的生日'], ['dragonboat', '端午香包'], ['valentine', '情人節巧克力'], ['midautumn', '中秋賞月'],
+  ['newyear', '新年拜年'], ['petbday', '撫子的生日'], ['dragonboat', '端午香包'], ['valentine', '情人節巧克力'], ['midautumn', '中秋賞月'], ['rainy', '下雨帶傘'], ['chilly', '天冷保暖'], ['hot', '天熱喝水'],
 ];
 
 // 歌曲與樂曲：檔名（去掉副檔名）就是曲名；只在使用者自己點曲子時才演出
@@ -730,6 +776,7 @@ function setupIPC() {
     placePet(x, y);
     settings.x = Math.round(x);
     settings.y = Math.round(y);
+    settings.winH = winSize().height;
     saveSettingsSoon();
   });
 
@@ -756,7 +803,7 @@ function setupIPC() {
     dragTimer = null;
     if (pet) {
       const b = pet.getBounds();
-      settings.x = b.x; settings.y = b.y;
+      settings.x = b.x; settings.y = b.y; settings.winH = b.height;
       saveSettingsSoon();
     }
   });
@@ -769,6 +816,11 @@ function setupIPC() {
   ipcMain.on('panel:set', (_e, key, value) => updateSetting(key, value));
   ipcMain.on('panel:force', (_e, k) => setForced(k || null));
   ipcMain.on('panel:action', (_e, k) => send('pet:action', k));
+  // 天氣：搜尋城市（用系統語言顯示地名）、現在查一次（有要提醒的就直接演給你看）
+  ipcMain.handle('weather:search', async (_e, name) => {
+    try { return { list: await weather.geocode(name, (app.getLocale() || 'en').slice(0, 2)) }; } catch (e) { return { error: e.message }; }
+  });
+  ipcMain.handle('weather:check', () => checkWeather(true));
   ipcMain.handle('music:list', (_e, kind) => listSongs(kind));
   // 樂譜（同步讀，只讀 app/scores/ 底下的 .json，檔名不能有路徑）
   ipcMain.on('score:read', (e, file) => {
@@ -826,6 +878,8 @@ if (!app.requestSingleInstanceLock()) {
     createPet();
     makeTray();
     setInterval(pollSnapshot, 600);
+    setInterval(weatherTick, 60 * 1000);
+    setTimeout(weatherTick, 15 * 1000);
     setInterval(() => { if (settings.alwaysOnTop && pet && !pet.isDestroyed() && pet.isVisible()) pet.moveTop(); }, 3000);
     if (process.argv.includes('--panel')) openPanel();
     registerHotkey();
