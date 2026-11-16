@@ -72,12 +72,13 @@ function decide(fc, th = {}) {
   return r;
 }
 
-function summary(r) {
-  if (!r) return '查不到天氣';
+// T：翻譯函式（主程式傳進來，照介面語言查字典）；沒傳就是繁體中文
+function summary(r, T = (s, ...a) => s.replace(/\{(\d+)\}/g, (m, i) => a[i])) {
+  if (!r) return T('查不到天氣');
   const parts = [];
-  if (r.rain != null) parts.push(`降雨機率最高 ${r.rain}%`);
-  if (r.tmin != null) parts.push(`氣溫 ${Math.round(r.tmin)}～${Math.round(r.tmax)}°C`);
-  return `接下來 ${HOURS} 小時：${parts.join('，')}`;
+  if (r.rain != null) parts.push(T('降雨機率最高 {0}%', r.rain));
+  if (r.tmin != null) parts.push(T('氣溫 {0}～{1}°C', Math.round(r.tmin), Math.round(r.tmax)));
+  return T('接下來 {0} 小時：', HOURS) + parts.join(T('，'));
 }
 
 // "07:00, 15:00,23:00" → ['07:00','15:00','23:00']（不合法的丟掉、排序、去重）

@@ -8,6 +8,8 @@
 //   node tools/generate-voices.js --engine edge   # 改用 Edge TTS（需要 pip install edge-tts）
 //   node tools/generate-voices.js --check         # 檢查哪些台詞還沒有音檔
 //   node tools/generate-voices.js --list          # 只列出會生成哪些，不呼叫任何服務
+//   node tools/generate-voices.js --lang ja       # 生成日文語音（讀 app/voice/ja/lines.json，音檔也放那裡）；en 同理
+//   node tools/generate-voices.js --out <資料夾>  # 音檔改放到別的資料夾（試做樣本用，不動正式檔）
 //
 // Breeze 選項：--url http://127.0.0.1:8080  --voice agent_girl  --model breeze-tts
 // 輸出格式：有 ffmpeg 就轉成 mp3（小很多）；沒有就保留服務回傳的格式（通常是 wav）。
@@ -17,10 +19,14 @@ const { spawnSync } = require('child_process');
 const voice = require('../app/lib/voicecore');
 const studio = require('../app/lib/voicestudio');
 
-const DIR = path.join(__dirname, '..', 'app', 'voice');
+const BASE = path.join(__dirname, '..', 'app', 'voice');
+let DIR = BASE;   // 台詞表所在的資料夾（照 --lang 換）
+let OUT = BASE;   // 音檔輸出的資料夾（預設跟台詞表同一個；--out 可以改）
+// Edge TTS 各語言預設的聲音（Breeze 的 agent_girl 是照中文調的，日文、英文要另外挑聲音）
+const EDGE_VOICE = { 'zh-TW': 'zh-TW-HsiaoChenNeural', ja: 'ja-JP-NanamiNeural', en: 'en-US-AriaNeural' };
 
 function parseArgs(argv) {
-  const o = { engine: 'breeze', url: 'http://127.0.0.1:8080', voice: null, model: 'breeze-tts', force: false, only: null, list: false, check: false };
+  const o = { engine: 'breeze', url: 'http://127.0.0.1:8080', voice: null, model: 'breeze-tts', force: false, only: null, list: false, check: false, lang: 'zh-TW', out: null };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--force') o.force = true;
@@ -31,9 +37,12 @@ function parseArgs(argv) {
     else if (a === '--voice') o.voice = argv[++i];
     else if (a === '--model') o.model = argv[++i];
     else if (a === '--only') o.only = argv[++i].split(',');
+    else if (a === '--lang') o.lang = argv[++i];
+    else if (a === '--out') o.out = argv[++i];
     else { console.error(`不認識的參數：${a}`); process.exit(2); }
   }
-  if (!o.voice) o.voice = o.engine === 'edge' ? 'zh-TW-HsiaoChenNeural' : 'agent_girl';
+  if (!['zh-TW', 'ja', 'en'].includes(o.lang)) { console.error(`不認識的語言：${o.lang}（可用 zh-TW、ja、en）`); process.exit(2); }
+  if (!o.voice) o.voice = o.engine === 'edge' ? EDGE_VOICE[o.lang] : 'agent_girl';
   return o;
 }
 
@@ -41,7 +50,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const hasFfmpeg = () => spawnSync('ffmpeg', ['-version'], { stdio: 'ignore' }).status === 0;
 
 // 句尾補「……」，避免 TTS 把最後一個字吃掉；語音工作室可以替每句設定補幾個（pad）與後面接幾毫秒靜音（tail）
-const spoken = (l) => studio.spokenText(l, l.pad == null ? 1 : l.pad);
+// 日文、英文預設不補「……」，句子裡的「~」換成逗號（原因見 voicestudio.js 的 spokenText）
+let LANG = 'zh-TW';
+const spoken = (l) => studio.spokenText(l, l.pad == null ? studio.defaultPad(LANG) : l.pad, LANG);
 
 async function breeze(o, text) {
   // 一次只能處理一個請求；忙碌（409）就等一下再試
@@ -65,10 +76,10 @@ function edge(o, text, tmp) {
 }
 
 function save(base, got, ffmpeg) {
-  const raw = path.join(DIR, `${base}.${got.ext}`);
+  const raw = path.join(OUT, `${base}.${got.ext}`);
   if (got.ext === 'mp3' || !ffmpeg) { fs.writeFileSync(raw, got.data); return path.basename(raw); }
-  const tmp = path.join(DIR, `${base}.tmp.${got.ext}`);
-  const out = path.join(DIR, `${base}.mp3`);
+  const tmp = path.join(OUT, `${base}.tmp.${got.ext}`);
+  const out = path.join(OUT, `${base}.mp3`);
   fs.writeFileSync(tmp, got.data);
   const r = spawnSync('ffmpeg', ['-y', '-loglevel', 'error', '-i', tmp, '-ac', '1', '-ar', '24000', '-b:a', '48k', out]);
   fs.unlinkSync(tmp);
@@ -78,8 +89,12 @@ function save(base, got, ffmpeg) {
 
 async function main() {
   const o = parseArgs(process.argv.slice(2));
+  LANG = o.lang;
+  DIR = o.lang === 'zh-TW' ? BASE : path.join(BASE, o.lang);
+  OUT = o.out ? path.resolve(o.out) : DIR;
+  fs.mkdirSync(OUT, { recursive: true });
   const lines = JSON.parse(fs.readFileSync(path.join(DIR, 'lines.json'), 'utf8'));
-  const existing = new Set(fs.readdirSync(DIR));
+  const existing = new Set(fs.readdirSync(OUT));
   const jobs = [];
   for (const [key, arr] of Object.entries(lines)) {
     if (key.startsWith('_') || (o.only && !o.only.includes(key))) continue;
@@ -95,17 +110,17 @@ async function main() {
     process.exitCode = jobs.length ? 1 : 0;
     return;
   }
-  console.log(`要生成 ${jobs.length} 句（引擎：${o.engine}，聲音：${o.voice}）`);
+  console.log(`要生成 ${jobs.length} 句（語言：${o.lang}，引擎：${o.engine}，聲音：${o.voice}）`);
   if (o.list) { for (const j of jobs) console.log(`  ${j.base}  ${j.text}`); return; }
   const ffmpeg = hasFfmpeg();
   if (!ffmpeg) console.log('找不到 ffmpeg：Breeze 的 wav 會直接保留（檔案較大，裝了 ffmpeg 再跑一次 --force 可轉成 mp3）');
   let ok = 0; const failed = [];
   for (const j of jobs) {
     try {
-      const got = o.engine === 'edge' ? edge(o, j.text, path.join(DIR, `${j.base}.tmp-edge.mp3`)) : await breeze(o, j.text);
+      const got = o.engine === 'edge' ? edge(o, j.text, path.join(OUT, `${j.base}.tmp-edge.mp3`)) : await breeze(o, j.text);
       if (got.ext === 'wav' && j.tail) got.data = studio.padWavSilence(got.data, j.tail);
       const name = save(j.base, got, ffmpeg);
-      fs.rmSync(path.join(DIR, `${j.base}.tmp-edge.mp3`), { force: true });
+      fs.rmSync(path.join(OUT, `${j.base}.tmp-edge.mp3`), { force: true });
       ok++;
       console.log(`✓ ${name}  ${j.shown}`);
     } catch (e) {

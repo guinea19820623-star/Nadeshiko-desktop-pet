@@ -111,45 +111,57 @@
     return { body, activity, tool, usage, limitKind, limitUntil: limitKind ? limitUntil : null };
   }
 
-  function fmtReset(sec, now) {
+  // T：翻譯函式（照介面語言查字典，見 i18n.js）；沒傳就是繁體中文原文
+  const plain = (s, ...a) => String(s).replace(/\{(\d+)\}/g, (m, i) => (a[i] == null ? '' : String(a[i])));
+
+  function fmtReset(sec, now, T = plain) {
     if (!sec) return '';
     const d = new Date(sec * 1000);
     const hh = String(d.getHours()).padStart(2, '0');
     const mm = String(d.getMinutes()).padStart(2, '0');
     const sameDay = new Date(now).toDateString() === d.toDateString();
     if (sameDay) return `${hh}:${mm}`;
-    const wd = '日一二三四五六'[d.getDay()];
-    return `週${wd} ${hh}:${mm}`;
+    const wd = ['週日', '週一', '週二', '週三', '週四', '週五', '週六'][d.getDay()];
+    return `${T(wd)} ${hh}:${mm}`;
   }
 
   // 頭上小字
-  function bubbleText(r, now) {
+  function bubbleText(r, now, T = plain) {
     switch (r.body) {
       case 'faint':
-        { const at = (r.limitKind === 'week' && r.limitUntil) || r.usage.weekResets; return at ? `週額度見底…${fmtReset(at, now)} 復活` : '週額度見底了…'; }
+        { const at = (r.limitKind === 'week' && r.limitUntil) || r.usage.weekResets; return at ? T('週額度見底…{0} 復活', fmtReset(at, now, T)) : T('週額度見底了…'); }
       case 'exhausted':
-        { const at = (r.limitKind === 'five' && r.limitUntil) || r.usage.fiveResets; return at ? `休息一下，${fmtReset(at, now)} 再戰` : '額度用完，休息中…'; }
+        { const at = (r.limitKind === 'five' && r.limitUntil) || r.usage.fiveResets; return at ? T('休息一下，{0} 再戰', fmtReset(at, now, T)) : T('額度用完，休息中…'); }
       case 'tired': {
         // 祐 2026-11-14：只說「有點累了…」，提醒注意用量就好（數字看 Claude 的用量圈圈）
-        return '有點累了…';
+        return T('有點累了…');
       }
       case 'working':
-        return r.tool ? `工作中 · ${r.tool}` : '工作中…';
+        return r.tool ? T('工作中 · {0}', r.tool) : T('工作中…');
       case 'thinking':
-        return '思考中…';
+        return T('思考中…');
       case 'compacting':
-        return '整理記憶中…';
+        return T('整理記憶中…');
       case 'waiting':
-        return '需要你確認一下～';
+        return T('需要你確認一下～');
       case 'done':
-        return '完成了！';
+        return T('完成了！');
       case 'error':
-        return '咦？出錯了…';
+        return T('咦？出錯了…');
       case 'hello':
-        return '嗨～我在這';
+        return T('嗨～我在這');
       default:
         return '';
     }
+  }
+
+  // 深夜勸睡（祐 2026-11-16）：現在是不是在「該睡了」的時段裡。from／to 是「HH:MM」，可以跨過午夜（例如 01:00～05:00、23:30～04:00）
+  function inNight(date, from, to) {
+    const m = (s) => { const r = /^(\d{1,2}):(\d{2})$/.exec(String(s || '')); return r ? Number(r[1]) * 60 + Number(r[2]) : null; };
+    const a = m(from), b = m(to);
+    if (a == null || b == null || a === b) return false;
+    const x = date.getHours() * 60 + date.getMinutes();
+    return a < b ? x >= a && x < b : x >= a || x < b;
   }
 
   // 視窗版面：左右各留一段透明邊，讓頭上的泡泡有地方跟著頭移動、靠邊時往內閃
@@ -162,7 +174,7 @@
     return { padX, bubbleH, width: size + padX * 2, height: size + bubbleH };
   }
 
-  const api = { DEFAULTS, resolve, bubbleText, fmtReset, layout };
+  const api = { DEFAULTS, resolve, bubbleText, fmtReset, layout, inNight };
   if (typeof module === 'object' && module.exports) module.exports = api;
   else root.PetCore = api;
 })(typeof self !== 'undefined' ? self : this);

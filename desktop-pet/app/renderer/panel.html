@@ -18,7 +18,7 @@
   #drag { position: absolute; left: 6%; right: 6%; top: 0; height: 12%; -webkit-app-region: drag; }
   #close { position: absolute; right: 19%; top: 13.2%; z-index: 2; width: 24px; height: 24px; padding: 0; text-align: center;
     border-radius: 50%; line-height: 22px; font-size: 14px; background: var(--chip); }
-  #page { position: absolute; left: 17.9%; right: 17%; top: 12.9%; bottom: 12.6%; overflow-y: auto; padding: 4px 6px 4px 2px; }
+  #page { position: absolute; left: 17.9%; right: 17%; top: 12.9%; bottom: 12.6%; overflow-y: auto; overflow-x: hidden; padding: 4px 6px 4px 2px; }
   #page::-webkit-scrollbar { width: 6px; }
   #page::-webkit-scrollbar-thumb { background: rgba(120, 72, 24, .45); border-radius: 3px; }
   h1 { font: 700 20px/1.3 "Noto Serif TC", "PMingLiU", "Songti TC", serif; margin: 0 0 8px; text-align: center; letter-spacing: .12em; }
@@ -26,6 +26,11 @@
   section { background: var(--card); border: 1px solid var(--line); border-radius: 6px; padding: 10px; margin-bottom: 10px; }
   .row { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
   .row label { flex: 1; white-space: nowrap; }
+  /* 日文、英文的句子比較長：讓標籤可以換行，不要把版面撐出橫向捲軸（祐 2026-11-16） */
+  html[lang="ja"] .row label, html[lang="en"] .row label { white-space: normal; min-width: 5.5em; }
+  [hidden] { display: none !important; }
+  html[lang="ja"] h1, html[lang="en"] h1 { letter-spacing: .04em; font-size: 18px; padding: 0 26px; }
+  label.check input { flex: 0 0 auto; }
   .row select { flex: 1 1 auto; min-width: 0; }
   input[type=range] { flex: 2; accent-color: var(--accent); }
   output { min-width: 44px; text-align: right; font-variant-numeric: tabular-nums; }
@@ -68,6 +73,7 @@
 
   <section>
     <h2>外觀</h2>
+    <div class="row"><label for="lang">語言 / Language</label><select id="lang"></select></div>
     <div class="row"><label for="size">尺寸</label><input id="size" type="range" step="5"><output id="size-out"></output></div>
     <div class="row"><label for="bubbleScale">字大小</label><input id="bubbleScale" type="range" min="70" max="220" step="10"><output id="bubbleScale-out"></output></div>
     <div class="row"><label for="volume">音量</label><input id="volume" type="range" min="0" max="100" step="5"><output id="volume-out"></output></div>
@@ -95,6 +101,14 @@
     <div class="row"><label>天熱喝水：最高溫 ≥</label><input type="number" id="hotAt" min="15" max="50" step="1">°C</div>
     <div class="row"><button id="wx-check">現在查一次</button><span class="hint" id="wx-last" style="margin:0"></span></div>
     <p class="hint">同名的地方很多時會列出來讓你選；中文找不到或找錯，就改用英文（例如 Tainan、Hsinchu）。提醒時間建議填出門前一小時。下雨優先；沒有雨再看冷熱。只會送出城市的經緯度，查不到天氣時就不提醒。天氣資料：Open-Meteo.com</p>
+  </section>
+
+  <section class="wx">
+    <h2>深夜勸睡</h2>
+    <div class="row"><label class="check"><input type="checkbox" id="nt-on"> 啟用（這段時間碰到她，她會打哈欠勸你去睡）</label></div>
+    <div class="row"><label for="nt-from">時段</label><input type="text" id="nt-from" placeholder="01:00" style="width:5em">～<input type="text" id="nt-to" placeholder="05:00" style="width:5em"></div>
+    <div class="row"><label class="check"><input type="checkbox" id="nt-tell"> 也告訴 Claude（下次跟 Claude 說話時，帶上「幾點還在碰桌寵」）</label></div>
+    <p class="hint">滑鼠在她身上滑過、點一下、摸頭、拎起來都算；勸睡 10 分鐘最多一次。時段可以跨過午夜（例如 23:30～04:00），輪班的話照自己的睡覺時間改。只記時間和碰了哪裡，存在本機的 ~/.nadeshiko-pet/night.json。</p>
   </section>
 
   <section>
@@ -194,6 +208,9 @@
   </section>
 </div>
 </div>
+  <script src="../lib/i18n-ja.js"></script>
+  <script src="../lib/i18n-en.js"></script>
+  <script src="../lib/i18n.js"></script>
   <script src="panel.js"></script>
 </body>
 </html>

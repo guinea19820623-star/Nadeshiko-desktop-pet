@@ -75,3 +75,16 @@ test('fmtReset：同一天只顯示時間，其他天加星期', () => {
   assert.strictEqual(core.fmtReset(d.getTime() / 1000, d.getTime() - 3600 * 1000), '18:05');
   assert.match(core.fmtReset(d.getTime() / 1000 + 2 * 86400, d.getTime()), /^週. 18:05$/);
 });
+
+test('inNight：深夜勸睡的時段，可以跨過午夜', () => {
+  const at = (h, m) => new Date(2026, 10, 16, h, m);
+  assert.strictEqual(core.inNight(at(1, 0), '01:00', '05:00'), true);
+  assert.strictEqual(core.inNight(at(4, 59), '01:00', '05:00'), true);
+  assert.strictEqual(core.inNight(at(5, 0), '01:00', '05:00'), false);
+  assert.strictEqual(core.inNight(at(0, 59), '01:00', '05:00'), false);
+  assert.strictEqual(core.inNight(at(23, 45), '23:30', '04:00'), true);
+  assert.strictEqual(core.inNight(at(3, 0), '23:30', '04:00'), true);
+  assert.strictEqual(core.inNight(at(12, 0), '23:30', '04:00'), false);
+  assert.strictEqual(core.inNight(at(1, 0), '', '05:00'), false);
+  assert.strictEqual(core.inNight(at(1, 0), '01:00', '01:00'), false);
+});

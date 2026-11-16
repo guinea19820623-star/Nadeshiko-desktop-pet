@@ -221,7 +221,48 @@ function takeAction(lastId, maxAgeMs = 10000, now = Date.now()) {
   return d;
 }
 
+// ---------- 深夜勸睡：桌寵把「半夜還在碰她」記下來，下次跟 Claude 說話時帶進對話（祐 2026-11-16） ----------
+// night.json：{ touches: [{ t, last, n, kinds }], reported }
+//   一分鐘內連續的觸碰併成一筆；只留一天內的。reported＝已經告訴過 Claude 的時間點
+const NIGHT_KINDS = { hover: '滑過', click: '點了', pat: '摸頭', drag: '拎起來' };
+const NIGHT_MERGE_MS = 60 * 1000;
+
+function recordNightTouch(kind, now = Date.now()) {
+  if (!NIGHT_KINDS[kind]) return null;
+  const file = path.join(stateDir(), 'night.json');
+  const d = readJSON(file) || {};
+  const touches = (Array.isArray(d.touches) ? d.touches : []).filter((x) => x && now - x.last < 24 * 3600 * 1000);
+  const last = touches[touches.length - 1];
+  if (last && now - last.last < NIGHT_MERGE_MS) {
+    last.last = now; last.n = (last.n || 1) + 1;
+    if (!last.kinds.includes(kind)) last.kinds.push(kind);
+  } else {
+    touches.push({ t: now, last: now, n: 1, kinds: [kind] });
+  }
+  const data = { touches: touches.slice(-50), reported: d.reported || 0 };
+  writeJSON(file, data);
+  return data;
+}
+
+const hhmm = (t) => { const d = new Date(t); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
+
+// 還沒告訴過 Claude、而且 12 小時內的深夜觸碰 → 一段給 Claude 看的說明（同時記成已告訴）；沒有就回傳 null
+function takeNightNote(now = Date.now()) {
+  const file = path.join(stateDir(), 'night.json');
+  const d = readJSON(file);
+  if (!d || !Array.isArray(d.touches)) return null;
+  const fresh = d.touches.filter((x) => x && x.last > (d.reported || 0) && now - x.last < 12 * 3600 * 1000);
+  if (!fresh.length) return null;
+  writeJSON(file, Object.assign(d, { reported: now }));
+  const first = fresh[0].t, last = fresh[fresh.length - 1].last;
+  const kinds = [...new Set(fresh.flatMap((x) => x.kinds || []))].map((k) => NIGHT_KINDS[k]).filter(Boolean);
+  const date = new Date(first);
+  const when = first === last || hhmm(first) === hhmm(last) ? hhmm(first) : `${hhmm(first)}～${hhmm(last)}`;
+  return `【桌寵回報】使用者深夜還醒著：${date.getMonth() + 1}/${date.getDate()} ${when} 在電腦前碰了桌寵（${kinds.join('、')}）。`
+    + '這是桌寵自動記下的。如果對方現在還沒睡，可以用你平常的口吻，溫柔提醒對方早點休息；已經是白天了就輕輕帶過，不用說教。';
+}
+
 module.exports = {
   stateDir, writeJSON, readJSON, mapHookEvent, applyHookEvent, applyStatusline, readQuota,
-  readSnapshot, pruneSessions, safeId, requestAction, takeAction,
+  readSnapshot, pruneSessions, safeId, requestAction, takeAction, recordNightTouch, takeNightNote,
 };

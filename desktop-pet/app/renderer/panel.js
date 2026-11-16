@@ -1,6 +1,27 @@
 'use strict';
+/* global PetI18n */
 const host = window.panelHost;
 const $ = (id) => document.getElementById(id);
+
+// 介面語言（祐 2026-11-16）：程式和 panel.html 照舊寫繁體中文，顯示前查字典（app/lib/i18n.js）。
+// T()：程式裡組出來的字；translateDom()：把畫面上現成的字（HTML 裡寫的、清單按鈕）整批換掉。
+// 字典裡沒有的就維持中文。換語言時整頁重新載入。
+let settings = {};
+const T = (str, ...args) => PetI18n.t(settings.lang, str, ...args);
+function translateDom(root) {
+  if (PetI18n.norm(settings.lang) === PetI18n.DEFAULT) return;
+  const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  for (let n = w.nextNode(); n; n = w.nextNode()) {
+    const raw = n.nodeValue;
+    const k = raw.trim();
+    if (!k || (n.parentNode && /^(SCRIPT|STYLE|PRE)$/.test(n.parentNode.nodeName))) continue;
+    const tr = T(k);
+    if (tr !== k) n.nodeValue = raw.replace(k, tr);
+  }
+  for (const el of root.querySelectorAll('[placeholder],[title]')) {
+    for (const a of ['placeholder', 'title']) if (el.hasAttribute(a)) el.setAttribute(a, T(el.getAttribute(a)));
+  }
+}
 
 const TOGGLES = [
   ['walk', '在螢幕下緣走動'], ['fly', '偶爾飛起來'],
@@ -38,7 +59,6 @@ const VLABEL = {
 let voiceData = null;   // { lines, files, url, voice, max }
 let studioAudio = null;
 
-let settings = {};
 let forced = null;
 
 function bindRange(id, key, fmt) {
@@ -58,7 +78,7 @@ async function renderSongs(kind) {
   if (!songs.length) {
     const p = document.createElement('p');
     p.className = 'hint';
-    p.textContent = '還沒有曲子';
+    p.textContent = T('還沒有曲子');
     box.appendChild(p);
   }
   for (const s of songs) {
@@ -92,15 +112,27 @@ function render() {
   for (const b of document.querySelectorAll('#toggles input')) b.checked = !!settings[b.dataset.key];
   // 天氣提醒（輸入框正在打字時不要蓋掉）
   $('wx-on').checked = !!settings.weatherOn;
-  $('wx-place').textContent = settings.weatherPlace ? `目前地點：${settings.weatherPlace.label}` : '還沒設定城市（搜尋後選一個）';
+  $('wx-place').textContent = settings.weatherPlace ? T('目前地點：{0}', settings.weatherPlace.label) : T('還沒設定城市（搜尋後選一個）');
   if (document.activeElement !== $('wx-times')) $('wx-times').value = settings.weatherTimes || '';
   for (const k of ['rainAt', 'coldAt', 'hotAt']) if (document.activeElement !== $(k)) $(k).value = settings[k];
+  // 深夜勸睡
+  $('nt-on').checked = settings.nightOn !== false;
+  $('nt-tell').checked = settings.nightTell !== false;
+  if (document.activeElement !== $('nt-from')) $('nt-from').value = settings.nightFrom || '01:00';
+  if (document.activeElement !== $('nt-to')) $('nt-to').value = settings.nightTo || '05:00';
   const wl = settings.weatherLast;
-  $('wx-last').textContent = wl ? `${new Date(wl.at).toLocaleString()}　${wl.text}${wl.kind ? `→ ${WX_LABEL[wl.kind]}` : '→ 不用提醒'}` : '';
+  $('wx-last').textContent = wl ? `${new Date(wl.at).toLocaleString()}　${wl.text}${wl.kind ? `→ ${T(WX_LABEL[wl.kind])}` : T('→ 不用提醒')}` : '';
   for (const b of document.querySelectorAll('#force button')) b.classList.toggle('on', (b.dataset.key || null) === (forced || null));
 }
 
 const WX_LABEL = { rainy: '下雨帶傘', chilly: '天冷保暖', hot: '天熱喝水' };
+
+function bindNight() {
+  $('nt-on').onchange = (e) => host.set('nightOn', e.target.checked);
+  $('nt-tell').onchange = (e) => host.set('nightTell', e.target.checked);
+  $('nt-from').onchange = (e) => host.set('nightFrom', e.target.value);
+  $('nt-to').onchange = (e) => host.set('nightTo', e.target.value);
+}
 
 function bindWeather() {
   $('wx-on').onchange = (e) => host.set('weatherOn', e.target.checked);
@@ -108,10 +140,10 @@ function bindWeather() {
   const find = async () => {
     const q = $('wx-q').value.trim();
     if (!q) return;
-    $('wx-place').textContent = '搜尋中…';
+    $('wx-place').textContent = T('搜尋中…');
     const r = await host.weatherSearch(q);
     found = r.list || [];
-    if (r.error || !found.length) { $('wx-place').textContent = r.error ? `搜尋失敗（${r.error}）` : '找不到這個地方，換個寫法試試（中文、英文都可以）'; return; }
+    if (r.error || !found.length) { $('wx-place').textContent = r.error ? T('搜尋失敗（{0}）', r.error) : T('找不到這個地方，換個寫法試試（中文、英文都可以）'); return; }
     const sel = $('wx-pick');
     sel.innerHTML = '';
     found.forEach((p, i) => { const o = document.createElement('option'); o.value = i; o.textContent = p.label; sel.appendChild(o); });
@@ -124,7 +156,7 @@ function bindWeather() {
   $('wx-times').onchange = (e) => host.set('weatherTimes', e.target.value);
   for (const k of ['rainAt', 'coldAt', 'hotAt']) $(k).onchange = (e) => host.set(k, Number(e.target.value));
   $('wx-check').onclick = async () => {
-    $('wx-last').textContent = '查詢中…';
+    $('wx-last').textContent = T('查詢中…');
     const r = await host.weatherCheck();
     if (r.error) $('wx-last').textContent = r.error;
   };
@@ -135,6 +167,11 @@ async function main() {
   const init = await host.init();
   settings = init.settings;
   forced = init.forced;
+  document.documentElement.lang = PetI18n.norm(settings.lang);
+  document.title = T('撫子 控制面板');
+  for (const [k, l] of PetI18n.LANGS) { const o = document.createElement('option'); o.value = k; o.textContent = l; $('lang').appendChild(o); }
+  $('lang').value = PetI18n.norm(settings.lang);
+  $('lang').onchange = (e) => host.set('lang', e.target.value);
   $('size').min = init.sizeMin;
   $('size').max = init.sizeMax;
   bindRange('size', 'size', (v) => `${v}px`);
@@ -144,10 +181,11 @@ async function main() {
   bindRange('tiredAt', 'tiredAt', (v) => `${v}%`);
   bindRange('faintAt', 'faintAt', (v) => `${v}%`);
   bindRange('napAt', 'napAt', (v) => `${v}%`);
-  $('dir').textContent = `狀態資料夾：${init.stateDir}`;
+  $('dir').textContent = T('狀態資料夾：{0}', init.stateDir);
 
   $('actMode').onchange = (e) => host.set('actMode', e.target.value);
   bindWeather();
+  bindNight();
   // 主人的生日：月、日兩個下拉選單（預設 1 月 1 日，選了就存 MM-DD），「啟用」打勾才會在生日那天捧蛋糕
   const fill = (sel, n) => {
     sel.innerHTML = '';
@@ -201,11 +239,17 @@ async function main() {
   $('send-usage').onclick = () => { host.force(null); host.simUsage(Number($('u5').value), Number($('u7').value)); };
   $('clear').onclick = () => host.simClear();
 
-  host.onSettings((s) => { settings = s; render(); });
+  host.onSettings((s) => {
+    const langChanged = PetI18n.norm(s.lang) !== PetI18n.norm(settings.lang);
+    settings = s;
+    if (langChanged) { location.reload(); return; } // 換語言：整頁重新載入，所有字一次換掉
+    render();
+  });
   host.onForce((k) => { forced = k; render(); });
   host.onSnapshot(showSnap);
   showSnap(init.snapshot);
   render();
+  translateDom(document.body);
   initVoice();
 }
 
@@ -243,7 +287,7 @@ function renderVoice() {
   for (const { l, i, isNew } of slots) {
     const d = document.createElement('div');
     d.className = 'vline';
-    d.innerHTML = `<h3>${isNew ? '＋ 新增一句' : `第 ${i + 1} 句`}${!isNew && !have(i) ? '（還沒有音檔）' : ''}</h3>
+    d.innerHTML = `<h3>${isNew ? T('＋ 新增一句') : T('第 {0} 句', i + 1)}${!isNew && !have(i) ? T('（還沒有音檔）') : ''}</h3>
       <div class="f"><span>顯示</span><input type="text" class="t-text" placeholder="頭上顯示的字"></div>
       <div class="f"><span>唸</span><input type="text" class="t-say" placeholder="實際唸的字（空白＝跟顯示一樣）"></div>
       <div class="f"><span>句尾</span><span>補 <input type="number" class="t-pad" min="0" max="5" step="1"> 個「……」，再接 <input type="number" class="t-tail" min="0" max="1500" step="50"> 毫秒靜音</span></div>
@@ -252,9 +296,11 @@ function renderVoice() {
       <div class="f"><span>次數</span><span>連生 <input type="number" class="t-n" min="1" max="5" step="1" value="1"> 次，挑一個最好的</span></div>
       <div class="btns"><button class="b-play">▶ 試聽現有</button><button class="b-gen primary">生成</button></div>
       <div class="takes"></div><p class="vmsg"></p>`;
+    translateDom(d);
     d.querySelector('.t-text').value = l.text || '';
     d.querySelector('.t-say').value = l.say || '';
-    d.querySelector('.t-pad').value = l.pad == null ? 1 : l.pad;
+    // 日文、英文預設不補「……」（補了 Breeze 會在句尾多念一段，祐 2026-11-16）
+    d.querySelector('.t-pad').value = l.pad == null ? (PetI18n.norm(settings.lang) === PetI18n.DEFAULT ? 1 : 0) : l.pad;
     d.querySelector('.t-tail').value = l.tail || 0;
     const volIn = d.querySelector('.t-vol');
     const volOut = d.querySelector('.t-volv');
@@ -270,16 +316,16 @@ function renderVoice() {
     if (isNew || !have(i)) { gainBtn.disabled = true; restoreBtn.style.display = 'none'; }
     else if (!backedUp) restoreBtn.style.display = 'none';
     gainBtn.onclick = async () => {
-      if (Number(volIn.value) === applied && !(Number(l.vol) > 0)) { vmsg(d, `音檔已經是 ${applied}%，不用改`); return; }
+      if (Number(volIn.value) === applied && !(Number(l.vol) > 0)) { vmsg(d, T('音檔已經是 {0}%，不用改', applied)); return; }
       gainBtn.disabled = true;
-      vmsg(d, '改音檔中…');
+      vmsg(d, T('改音檔中…'));
       const r = await host.voiceGain({ key, i, percent: Number(volIn.value) });
       gainBtn.disabled = false;
       if (r.error) { vmsg(d, r.error, true); return; }
       voiceData = { ...voiceData, lines: r.lines, files: r.files, backups: r.backups };
       renderVoice();
       const nb = $('v-lines').querySelectorAll('.vline')[i];
-      if (nb) vmsg(nb, `已把音檔改成 ${volIn.value}%（原檔有備份，可以還原），撫子下次開口就是新的音量`);
+      if (nb) vmsg(nb, T('已把音檔改成 {0}%（原檔有備份，可以還原），撫子下次開口就是新的音量', volIn.value));
     };
     restoreBtn.onclick = async () => {
       const r = await host.voiceGain({ key, i, restore: true });
@@ -287,14 +333,14 @@ function renderVoice() {
       voiceData = { ...voiceData, lines: r.lines, files: r.files, backups: r.backups };
       renderVoice();
       const nb = $('v-lines').querySelectorAll('.vline')[i];
-      if (nb) vmsg(nb, '已還原成原本的音檔');
+      if (nb) vmsg(nb, T('已還原成原本的音檔'));
     };
     const play = d.querySelector('.b-play');
     if (isNew || !have(i)) play.disabled = true;
     play.onclick = async () => {
       const r = await host.voiceRead(key, i);
       // 現有音檔已經是 applied%，試聽時換算回「相對原檔」的滑桿值
-      if (r) playBytes(r.bytes, r.mime, Number(volIn.value) * 100 / applied); else vmsg(d, '這句還沒有音檔', true);
+      if (r) playBytes(r.bytes, r.mime, Number(volIn.value) * 100 / applied); else vmsg(d, T('這句還沒有音檔'), true);
     };
     const entry = () => ({
       text: d.querySelector('.t-text').value, say: d.querySelector('.t-say').value,
@@ -314,39 +360,39 @@ function renderVoice() {
         if (r.error) { vmsg(d, r.error, true); return; }
         if (takeId && pct !== 100) {
           const g = await host.voiceGain({ key, i, percent: pct });
-          if (g.error) { vmsg(d, `已採用，但改音量失敗：${g.error}`, true); return; }
+          if (g.error) { vmsg(d, T('已採用，但改音量失敗：{0}', g.error), true); return; }
           r = g;
         }
         voiceData = { ...voiceData, lines: r.lines, files: r.files, backups: r.backups || voiceData.backups };
         renderVoice();
         const nb = $('v-lines').querySelectorAll('.vline')[i];
-        if (nb) vmsg(nb, takeId ? `已採用${pct !== 100 ? `（音量 ${pct}%）` : ''}，撫子下次開口就是新的聲音` : '已存台詞（音檔沒變）');
+        if (nb) vmsg(nb, takeId ? T('已採用{0}，撫子下次開口就是新的聲音', pct !== 100 ? T('（音量 {0}%）', pct) : '') : T('已存台詞（音檔沒變）'));
       };
       return b;
     };
-    if (!isNew) d.querySelector('.btns').appendChild(adoptBtn('只存文字（不換音檔）', null));
+    if (!isNew) d.querySelector('.btns').appendChild(adoptBtn(T('只存文字（不換音檔）'), null));
     d.querySelector('.b-gen').onclick = async (ev) => {
       const e = entry();
-      if (!e.text.trim() && !e.say.trim()) { vmsg(d, '請先填要唸的字', true); return; }
+      if (!e.text.trim() && !e.say.trim()) { vmsg(d, T('請先填要唸的字'), true); return; }
       const btn = ev.currentTarget;
       const n = Math.max(1, Math.min(5, Number(d.querySelector('.t-n').value) || 1));
       btn.disabled = true;
-      vmsg(d, `生成中…（${n} 次，一次只能做一個）`);
+      vmsg(d, T('生成中…（{0} 次，一次只能做一個）', n));
       d.querySelector('.takes').textContent = '';
       const r = await host.voiceGen({ ...e, takes: n });
       btn.disabled = false;
       if (r.error) { vmsg(d, r.error, true); return; }
-      vmsg(d, `唸的是：${r.text}`);
+      vmsg(d, T('唸的是：{0}', r.text));
       r.takes.forEach((t, k) => {
         const row = document.createElement('div');
         row.className = 'take';
         const p = document.createElement('button');
-        p.textContent = `▶ 版本 ${k + 1}`;
+        p.textContent = T('▶ 版本 {0}', k + 1);
         p.onclick = () => playBytes(t.bytes, 'audio/wav', Number(volIn.value));
         const ms = document.createElement('span');
         ms.className = 'ms';
-        ms.textContent = t.ms == null ? '' : `${(t.ms / 1000).toFixed(2)} 秒`;
-        row.append(p, ms, adoptBtn('採用這個', t.id));
+        ms.textContent = t.ms == null ? '' : T('{0} 秒', (t.ms / 1000).toFixed(2));
+        row.append(p, ms, adoptBtn(T('採用這個'), t.id));
         d.querySelector('.takes').appendChild(row);
       });
       if (r.takes[0]) playBytes(r.takes[0].bytes, 'audio/wav', Number(volIn.value));
@@ -362,7 +408,7 @@ async function initVoice() {
     if (k.startsWith('_')) continue;
     const o = document.createElement('option');
     o.value = k;
-    o.textContent = VLABEL[k] ? `${VLABEL[k]}（${k}）` : k;
+    o.textContent = VLABEL[k] ? `${T(VLABEL[k])}（${k}）` : k;
     sel.appendChild(o);
   }
   sel.onchange = renderVoice;

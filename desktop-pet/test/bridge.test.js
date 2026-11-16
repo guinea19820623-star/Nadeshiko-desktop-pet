@@ -134,3 +134,30 @@ test('readQuota：從對話紀錄檔尾讀出撞到哪個額度、幾點恢復',
   assert.strictEqual(bridge.readQuota(f, now), null);
   assert.strictEqual(bridge.readQuota(path.join(tmp, 'nope.jsonl'), now), null);
 });
+
+test('深夜勸睡：記下觸碰、一分鐘內併成一筆，hook 在 UserPromptSubmit 帶進對話一次', () => {
+  const t0 = new Date(2026, 10, 16, 1, 57).getTime();
+  bridge.recordNightTouch('hover', t0);
+  bridge.recordNightTouch('pat', t0 + 20 * 1000);
+  bridge.recordNightTouch('click', t0 + 13 * 60 * 1000);
+  assert.strictEqual(bridge.recordNightTouch('nope', t0), null);
+  const d = bridge.readJSON(path.join(process.env.NADESHIKO_PET_DIR, 'night.json'));
+  assert.strictEqual(d.touches.length, 2);
+  assert.deepStrictEqual(d.touches[0].kinds, ['hover', 'pat']);
+  const note = bridge.takeNightNote(t0 + 15 * 60 * 1000);
+  assert.match(note, /11\/16 01:57～02:10/);
+  assert.match(note, /滑過、摸頭、點了/);
+  assert.strictEqual(bridge.takeNightNote(t0 + 16 * 60 * 1000), null); // 說過了就不再說
+  // 超過 12 小時的舊紀錄不帶
+  bridge.recordNightTouch('drag', t0 + 20 * 60 * 1000);
+  assert.strictEqual(bridge.takeNightNote(t0 + 13 * 3600 * 1000), null);
+  // hook：有新的觸碰時輸出 additionalContext，其他事件不輸出
+  bridge.recordNightTouch('click', Date.now());
+  const run = (input) => execFileSync('node', [path.join(ROOT, 'hooks', 'pet-hook.js')], { input: JSON.stringify(input), env }).toString();
+  assert.strictEqual(run({ session_id: 'n1', hook_event_name: 'PreToolUse', tool_name: 'Read' }), '');
+  const out = JSON.parse(run({ session_id: 'n1', hook_event_name: 'UserPromptSubmit' }));
+  assert.strictEqual(out.hookSpecificOutput.hookEventName, 'UserPromptSubmit');
+  assert.match(out.hookSpecificOutput.additionalContext, /桌寵回報/);
+  assert.strictEqual(run({ session_id: 'n1', hook_event_name: 'UserPromptSubmit' }), '');
+  run({ session_id: 'n1', hook_event_name: 'SessionEnd' });
+});

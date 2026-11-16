@@ -12,8 +12,14 @@ const MAX_LINES = 3;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // 實際送去唸的字：去掉結尾的「…」後補 dots 個「……」，避免 TTS 把最後一個字吃掉
-function spokenText(line, dots = 1) {
-  const base = String(line.say || line.text || '').replace(/[…]+$/, '');
+// 日文、英文（祐 2026-11-16 聽樣本發現）：句子裡的「~」「～」加上句尾的「……」，Breeze 念完後會多發出一小段聽不懂的聲音。
+// 所以這兩種語言把「~／～／♪」換成逗號（句尾的直接拿掉），而且預設不補「……」（defaultPad）
+const defaultPad = (lang) => (lang === 'ja' || lang === 'en' ? 0 : 1);
+function spokenText(line, dots = 1, lang = 'zh-TW') {
+  let base = String(line.say || line.text || '').replace(/[…]+$/, '');
+  if (lang === 'ja' || lang === 'en') {
+    base = base.replace(/[~～♪\s]+$/, '').replace(/\s*[~～♪]+\s*/g, lang === 'en' ? ', ' : '、');
+  }
   return base + '……'.repeat(Math.max(0, Math.min(5, dots | 0)));
 }
 
@@ -167,4 +173,4 @@ function setGainMark(dir, key, i, pct) {
   fs.writeFileSync(f, formatLines(lines));
 }
 
-module.exports = { DEFAULTS, MAX_LINES, spokenText, synth, parseWav, wavDurationMs, padWavSilence, hasFfmpeg, saveAudio, formatLines, adopt, setFileGain, restoreFile, hasBackup };
+module.exports = { DEFAULTS, MAX_LINES, spokenText, defaultPad, synth, parseWav, wavDurationMs, padWavSilence, hasFfmpeg, saveAudio, formatLines, adopt, setFileGain, restoreFile, hasBackup };

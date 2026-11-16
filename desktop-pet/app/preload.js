@@ -23,6 +23,7 @@ contextBridge.exposeInMainWorld('petHost', {
   onSummon: on('pet:summon'),
   onVoice: on('pet:voice'),
   lantern: (o) => ipcRenderer.send('pet:lantern', o),
+  nightTouch: (kind) => ipcRenderer.send('pet:night-touch', kind),
   readScore: (file) => ipcRenderer.sendSync('score:read', file),
 });
 

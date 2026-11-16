@@ -2,7 +2,7 @@
 // 撫子桌寵：畫面與行為
 //
 // 優先序：使用者互動（拖曳、摸頭）> 測試狀態 > Claude 狀態（暈倒 > 睡覺 > 疲憊 > 工作 > 思考 …）> 隨機行為
-/* global PetCore, VoiceCore, ClipCore */
+/* global PetCore, VoiceCore, ClipCore, PetI18n */
 
 const host = window.petHost;
 const core = PetCore;
@@ -22,6 +22,7 @@ const ACTION_LINES = {
   pray: '願一切順利～', doze: 'Zzz…', curtsy: '日安～', pirouette: '轉一圈～', arabesque: '♪～',
   nod: '嗯嗯！', shake: '唔…不對吧？', mail: '有信來囉～', gift: '聖誕快樂～', birthday: '生日快樂～', lantern: '願望會實現的～', sparkler: '好漂亮～',
   newyear: '新年快樂～', petbday: '謝謝你遇見我～', dragonboat: '端午節快樂～', valentine: '情人節快樂…', midautumn: '中秋節快樂～', rainy: '記得帶傘喔～', chilly: '天冷了，記得保暖～', hot: '天熱了，記得多喝水～',
+  bedtime: '很晚了，該睡了喔～',
 };
 
 const S = {
@@ -68,7 +69,10 @@ const groundY = () => S.workArea.y + S.workArea.height - S.bubbleH - groundPx();
 const onGround = () => Math.abs(S.pos.y - groundY()) < 2;
 
 // ---------- 語音 ----------
-const VOICE_DIR = '../voice/';
+// 語音照介面語言分資料夾：繁體中文在 voice/，其他在 voice/ja/、voice/en/（主程式告訴我們是哪個）
+const voiceBase = () => `../voice/${S.voiceSub ? `${S.voiceSub}/` : ''}`;
+// 介面文字：照舊寫繁體中文，用設定的語言查字典（app/lib/i18n.js）
+const T = (str, ...args) => PetI18n.t(S.settings && S.settings.lang, str, ...args);
 const VOICE_COOLDOWN = { thinking: 60000, working: 60000, compacting: 60000, tired: 120000, exhausted: 120000, faint: 120000, nap: 30000, sit: 30000, perch: 30000, perch_lie: 30000, drop: 20000, shy: 8000 };
 let audioCache = {};
 let voiceVer = 0; // 語音工作室換了音檔後加一，避免讀到舊的快取
@@ -105,7 +109,7 @@ function playFile(file, lineVol = 100) {
   if (!s.voice || !file || !(s.volume > 0)) return;
   try {
     let a = audioCache[file];
-    if (!a) { a = new Audio(`${VOICE_DIR}${file}?v=${voiceVer}`); a.preload = 'auto'; audioCache[file] = a; } // 第一次要用才載入
+    if (!a) { a = new Audio(`${voiceBase()}${file}?v=${voiceVer}`); a.preload = 'auto'; audioCache[file] = a; } // 第一次要用才載入
     if (nowPlaying && nowPlaying !== a) nowPlaying.pause();
     setLoudness(a, (s.volume / 100) * (lineVol / 100));
     a.currentTime = 0;
@@ -125,7 +129,7 @@ function voiceReady(key) {
 // 回傳要顯示的字：有台詞表就用挑到的那句（跟聲音同步），沒有就用固定字
 function say(key, ms = 1800, opts = {}) {
   const line = chooseLine(key);
-  const text = line ? line.text : (ACTION_LINES[key] || key);
+  const text = line ? line.text : (ACTION_LINES[key] ? T(ACTION_LINES[key]) : key);
   if (line && line.file && voiceReady(key)) playFile(line.file, line.vol);
   if (!opts.mute) S.say = { text, until: performance.now() + ms };
   return text;
@@ -425,7 +429,7 @@ function idleMode(duration = rand(5, 12), sprite = 'idle') {
 
 // 動作 → 動畫片段（manifest.clips）。東張西望有正面與側身兩種，在 poseMode 裡隨機挑
 // 歡呼：Claude 完成時用循環版 cheer，自己歡呼整段播一次 cheerall（最後放下手回站姿）
-const POSE_CLIP = { yawn: 'yawn', stretch: 'stretch', wave: 'wave', cheer: 'cheerall', nap: 'sleep', pose: 'pose', shy: 'shy', happy: 'happy', curtsy: 'curtsy', pirouette: 'pirouette', arabesque: 'arabesque', nod: 'nod', shake: 'shake', mail: 'mail', gift: 'gift', birthday: 'birthday', lantern: 'lantern', sparkler: 'sparkler', newyear: 'newyear', petbday: 'petbday', dragonboat: 'dragonboat', valentine: 'valentine', midautumn: 'midautumn', rainy: 'rainy', chilly: 'chilly', hot: 'hot' };
+const POSE_CLIP = { yawn: 'yawn', stretch: 'stretch', wave: 'wave', cheer: 'cheerall', nap: 'sleep', pose: 'pose', shy: 'shy', happy: 'happy', curtsy: 'curtsy', pirouette: 'pirouette', arabesque: 'arabesque', nod: 'nod', shake: 'shake', mail: 'mail', gift: 'gift', birthday: 'birthday', lantern: 'lantern', sparkler: 'sparkler', newyear: 'newyear', petbday: 'petbday', dragonboat: 'dragonboat', valentine: 'valentine', midautumn: 'midautumn', rainy: 'rainy', chilly: 'chilly', hot: 'hot', bedtime: 'yawn' };
 
 // 定點姿勢（打哈欠、伸懶腰、揮手…）
 function poseMode(kind, duration) {
@@ -457,6 +461,7 @@ function poseMode(kind, duration) {
     rainy: { sprite: 'idle', dur: 4.6 },   // 下雨記得帶傘（白色蕾絲傘，祐 2026-11-15）
     chilly: { sprite: 'idle', dur: 5.0 },  // 氣溫偏低：圍上圍巾、對手心哈氣
     hot: { sprite: 'idle', dur: 5.0 },     // 氣溫偏高：搧風、喝水
+    bedtime: { sprite: 'yawn', dur: 2.6 }, // 深夜勸睡：打哈欠，說該睡了（祐 2026-11-16）
   }[kind];
   // 有動畫片段就播片段，沒有（或還沒載好）退回舊的單張圖加程式動作
   const clip = kind === 'curious' ? 'curious' : POSE_CLIP[kind]; // 東張西望只留 49 格正面版（祐 2026-11-12）
@@ -471,7 +476,7 @@ function poseMode(kind, duration) {
   return {
     name: kind,
     enter() {
-      say(kind, 1800, { mute: kind === 'curious' });
+      say(kind, kind === 'bedtime' ? 4000 : 1800, { mute: kind === 'curious' });
       if (def) ensureClip(clip);
       if (kind === 'lantern') host.lantern(lanternRect(false)); // 先在背景把天燈小視窗開好，第 26 格時才不會慢半拍
     },
@@ -653,7 +658,7 @@ function performMode(kind, file) {
           const lead = clipDef(p.start) ? clipSeconds(p.start) : 0.5;
           const times = synth.play(compiled, lead);
           endAt = performance.now() + (times.end - audioCtx.currentTime) * 1000 + 600;
-        } catch (e) { ended = true; S.say = { text: `彈不出來：${title}`, until: performance.now() + 4000 }; return; }
+        } catch (e) { ended = true; S.say = { text: T('彈不出來：{0}', title), until: performance.now() + 4000 }; return; }
         S.say = { text: `♪ ${title}`, until: performance.now() + 3000 };
         return;
       }
@@ -663,7 +668,7 @@ function performMode(kind, file) {
         audio = new Audio(MUSIC_DIR + p.dir + encodeURIComponent(file));
         audio.volume = clamp(S.settings.volume / 100, 0, 1);
         audio.onended = () => { ended = true; };
-        audio.onerror = () => { ended = true; S.say = { text: `放不出來：${title}`, until: performance.now() + 4000 }; };
+        audio.onerror = () => { ended = true; S.say = { text: T('放不出來：{0}', title), until: performance.now() + 4000 }; };
         audio.play().catch(() => { ended = true; });
       } catch (_) { ended = true; }
     },
@@ -1115,8 +1120,8 @@ async function pickPerch(only) {
   let why = null;
   if (!cands.length) {
     if (res.error) why = res.error;
-    else if (!all.length) why = '沒有偵測到其他視窗（最小化或全螢幕的不算）';
-    else why = `偵測到 ${all.length} 個視窗，但都太窄、太高、太靠下緣，或邊緣被別的視窗蓋住`;
+    else if (!all.length) why = T('沒有偵測到其他視窗（最小化或全螢幕的不算）');
+    else why = T('偵測到 {0} 個視窗，但都太窄、太高、太靠下緣，或邊緣被別的視窗蓋住', all.length);
     return { ok: null, why };
   }
   let r = Math.random() * cands.reduce((t, c) => t + c.weight, 0);
@@ -1187,11 +1192,11 @@ function perchMode(opts = {}) {
             ensureClip(target.v.sprite); // 飛過去的路上先載好坐／趴的片段
           });
         }
-        if (phaseT > 20) { why = '偵測視窗逾時'; phase = 'none'; }
+        if (phaseT > 20) { why = T('偵測視窗逾時'); phase = 'none'; }
         return true;
       }
       if (phase === 'none') {
-        if (opts.manual) { S.say = { text: `找不到可以坐的視窗：${why || '原因不明'}`, until: performance.now() + 6000 }; }
+        if (opts.manual) { S.say = { text: T('找不到可以坐的視窗：{0}', why || T('原因不明')), until: performance.now() + 6000 }; }
         return false;
       }
       if (phase === 'fly') {
@@ -1498,6 +1503,7 @@ function onPointerMove(e) {
       drag.swing = 0; drag.swingV = 0; drag.vx = 0;
       host.dragStart(drag.grip.x, drag.grip.y);
       setMode(dragMode());
+      if (nightTouch('drag')) say('bedtime', 4000);
       S.lastInteraction = performance.now();
     }
     return;
@@ -1506,6 +1512,7 @@ function onPointerMove(e) {
   // 點擊穿透：只有碰到不透明的地方才接住滑鼠
   const solid = alphaAt(x, y) >= 24;
   setHover(solid);
+  hoverNight(solid);
   if (solid && isHead(x, y)) detectStroke(x);
 }
 
@@ -1530,12 +1537,14 @@ function onPointerUp(e) {
     clicks.push(nowT);
     const shy = clicks.length >= 3;
     if (shy) clicks = [];
+    const sleepy = nightTouch('click'); // 深夜被點：不跳開心，改成打哈欠勸你去睡
     // 唱歌、拉琴、指揮時被點：停下來回到站姿（不跳開心）
-    if (mode && PERFORMING.has(mode.name)) { clicks = []; setMode(idleMode()); return; }
-    hearts(shy ? 3 : 2);
+    if (mode && PERFORMING.has(mode.name)) { clicks = []; setMode(idleMode()); if (sleepy) say('bedtime', 4000); return; }
+    const kind = sleepy ? 'bedtime' : shy ? 'shy' : 'happy';
+    if (!sleepy) hearts(shy ? 3 : 2);
     // 坐著／躺著被點會先起身；起身途中再點（連點兩下），不要打斷，排到站好之後再開心跳或害羞
-    if (mode && (mode.name === 'rise' || mode.name === 'wake')) { mode.after = () => poseMode(shy ? 'shy' : 'happy'); return; }
-    const react = () => setMode(poseMode(shy ? 'shy' : 'happy'));
+    if (mode && (mode.name === 'rise' || mode.name === 'wake')) { mode.after = () => poseMode(kind); return; }
+    const react = () => setMode(poseMode(kind));
     // 飛行中、坐在視窗邊緣被點到：人不能站在空中反應，先飄落到地面再做
     if (!onGround()) { if (mode && mode.name !== 'fall') setMode(fallMode(react)); return; }
     react();
@@ -1560,9 +1569,11 @@ function detectStroke(x) {
   if (stroke.flips >= 3 && (!mode || mode.name !== 'pat')) {
     S.lastInteraction = now;
     stroke.flips = 0;
+    const sleepy = nightTouch('pat');
+    const go = () => { setMode(patMode()); if (sleepy) say('bedtime', 4000); };
     // 在空中被摸頭：一樣先飄落再撒嬌
-    if (!onGround()) { if (mode && mode.name !== 'fall') setMode(fallMode(() => setMode(patMode()))); return; }
-    setMode(patMode());
+    if (!onGround()) { if (mode && mode.name !== 'fall') setMode(fallMode(go)); return; }
+    go();
   }
 }
 
@@ -1595,6 +1606,42 @@ function patMode() {
   };
 }
 
+// ---------- 深夜勸睡（祐 2026-11-16）----------
+// 設定的時段裡（預設 01:00～05:00）碰到她都算：滑鼠在她身上滑過、點、摸頭、拎起來。
+// 她會打哈欠說「該睡了」（10 分鐘最多一次）；也請主程序記下來，下次跟 Claude 說話時由 hook 帶進對話。
+const NIGHT_REACT_MS = 10 * 60 * 1000;
+const NIGHT_SEND_MS = 30 * 1000;
+const NIGHT_HOVER_MS = 800;   // 滑鼠在她身上移動超過這麼久才算「摸到」，路過不算
+const night = { reactAt: -1e12, sent: {}, hoverSince: 0, lastMove: 0 };
+
+function isNightNow() {
+  const s = S.settings;
+  return !!(s && s.nightOn && core.inNight(new Date(), s.nightFrom, s.nightTo));
+}
+
+// 回傳 true＝這次要勸睡（冷卻中就只記錄、不演）
+function nightTouch(kind) {
+  if (!isNightNow()) return false;
+  const now = performance.now();
+  if (now - (night.sent[kind] || -1e12) > NIGHT_SEND_MS) { night.sent[kind] = now; host.nightTouch(kind); }
+  if (now - night.reactAt < NIGHT_REACT_MS) return false;
+  night.reactAt = now;
+  return true;
+}
+
+function hoverNight(solid) {
+  const now = performance.now();
+  if (!solid) night.hoverSince = 0;
+  else if (!night.hoverSince || now - night.lastMove > 500) night.hoverSince = now; // 剛碰到、或停了一陣子才又動：重新計時
+  night.lastMove = now;
+  if (!solid || now - night.hoverSince < NIGHT_HOVER_MS) return;
+  night.hoverSince = now; // 一段滑動只算一次
+  if (!nightTouch('hover')) return;
+  // 站著、走著就停下來打哈欠；其他動作（坐著、睡著、表演中）只說一句，不打斷
+  if (mode && (mode.name === 'idle' || mode.name === 'walk') && onGround()) setMode(poseMode('bedtime'));
+  else say('bedtime', 4000);
+}
+
 function setHover(v) {
   if (v !== S.hover) S.hover = v;
   const ignore = !v;
@@ -1619,8 +1666,8 @@ function claudeState() {
 
 const INTERACTIONS = new Set(['drag', 'fall', 'pat', 'happy']);
 // 撫子回覆時可以叫、而且 Claude 工作中也會先演完的短動作（長的坐下、睡覺不算，免得卡住工作狀態）
-const EMOTE_SHORT = new Set(['yawn', 'stretch', 'wave', 'cheer', 'curious', 'pose', 'happy', 'shy', 'pray', 'curtsy', 'pirouette', 'arabesque', 'nod', 'shake', 'mail', 'gift', 'birthday', 'lantern', 'sparkler', 'newyear', 'petbday', 'dragonboat', 'valentine', 'midautumn', 'rainy', 'chilly', 'hot']);
-const FREE = new Set(['idle', 'walk', 'fly', 'yawn', 'stretch', 'wave', 'cheer', 'curious', 'pose', 'nap', 'sit', 'perch', 'shy', 'greet', 'pray', 'doze', 'standdoze', 'curtsy', 'pirouette', 'arabesque', 'nod', 'shake', 'mail', 'gift', 'birthday', 'lantern', 'sparkler', 'newyear', 'petbday', 'dragonboat', 'valentine', 'midautumn', 'rainy', 'chilly', 'hot']);
+const EMOTE_SHORT = new Set(['yawn', 'stretch', 'wave', 'cheer', 'curious', 'pose', 'happy', 'shy', 'pray', 'curtsy', 'pirouette', 'arabesque', 'nod', 'shake', 'mail', 'gift', 'birthday', 'lantern', 'sparkler', 'newyear', 'petbday', 'dragonboat', 'valentine', 'midautumn', 'rainy', 'chilly', 'hot', 'bedtime']);
+const FREE = new Set(['idle', 'walk', 'fly', 'yawn', 'stretch', 'wave', 'cheer', 'curious', 'pose', 'nap', 'sit', 'perch', 'shy', 'greet', 'pray', 'doze', 'standdoze', 'curtsy', 'pirouette', 'arabesque', 'nod', 'shake', 'mail', 'gift', 'birthday', 'lantern', 'sparkler', 'newyear', 'petbday', 'dragonboat', 'valentine', 'midautumn', 'rainy', 'chilly', 'hot', 'bedtime']);
 
 function chooseFree() {
   const s = S.settings;
@@ -1704,7 +1751,7 @@ function updateBubble(r) {
   const now = performance.now();
   const interacting = mode && INTERACTIONS.has(mode.name);
   if (S.say && S.say.until > now && (interacting || r.body === 'free')) text = S.say.text;
-  else if (r.body !== 'free') text = core.bubbleText(r, Date.now());
+  else if (r.body !== 'free') text = core.bubbleText(r, Date.now(), T);
   else if (mode && mode.name === 'nap') text = 'Zzz…';
 
   // 體力條移除（祐 2026-11-14）：用量看 Claude 對話框下面的用量圈圈，桌寵只用動作和「有點累了…」提醒
@@ -1763,7 +1810,7 @@ async function start() {
   S.settings = init.settings;
   S.manifest = init.manifest;
   S.snapshot = init.snapshot;
-  if (init.voice) S.voice = voiceCore.build(init.voice.lines, init.voice.files);
+  if (init.voice) { S.voiceSub = init.voice.sub || ''; S.voice = voiceCore.build(init.voice.lines, init.voice.files); }
   S.forced = init.forced;
   S.size = S.settings.size;
   await buildBitmaps();
@@ -1774,6 +1821,7 @@ async function start() {
   host.onVoice((v) => { // 語音工作室採用了新台詞或音檔
     if (nowPlaying) nowPlaying.pause();
     audioCache = {}; voiceVer++;
+    S.voiceSub = v.sub || '';
     S.voice = voiceCore.build(v.lines, v.files);
   });
   host.onForce((k) => { S.forced = k; });

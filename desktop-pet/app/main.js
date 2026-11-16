@@ -8,6 +8,7 @@ const path = require('path');
 const bridge = require('./lib/bridge');
 const { layout } = require('./lib/statecore');
 const weather = require('./lib/weather');
+const i18n = require('./lib/i18n');
 
 const BUBBLE_H = layout(250).bubbleH; // 視窗上方留給頭上小字的高度
 const SIZE_MIN = 100;
@@ -46,9 +47,18 @@ const DEFAULT_SETTINGS = {
   hotAt: 32,               // 最高溫 ≥ 這個 °C 提醒喝水
   weatherFired: {},        // 每個時段今天提醒過了沒（重開不會再提醒一次）
   weatherLast: null,       // 最近一次查詢的結果，控制面板顯示
+  // 深夜勸睡（祐 2026-11-16）：這個時段裡碰到她（滑鼠滑過、點、摸頭、拎起來），她會打哈欠勸你去睡；
+  // nightTell 打勾的話，也記下來，下次跟 Claude 說話時帶進對話
+  nightOn: true,
+  nightFrom: '01:00',
+  nightTo: '05:00',
+  nightTell: true,
+  lang: 'zh-TW',           // 介面與語音的語言：zh-TW／ja／en（祐 2026-11-16）
 };
 
 let settings = { ...DEFAULT_SETTINGS };
+// 介面文字：程式裡寫繁體中文，照設定的語言查字典（app/lib/i18n.js）
+const T = (str, ...args) => i18n.t(settings.lang, str, ...args);
 let pet = null;
 let panel = null;
 let tray = null;
@@ -387,18 +397,20 @@ function listWindows() {
 }
 
 // 語音台詞表 + 實際存在的音檔（沒有音檔就只出字，不會壞）
+function voiceDir() {
+  return path.join(__dirname, 'voice', i18n.voiceSub(settings.lang));
+}
 function readVoice() {
-  const dir = path.join(__dirname, 'voice');
+  const dir = voiceDir();
   let lines = {};
   let files = [];
   try { lines = JSON.parse(fs.readFileSync(path.join(dir, 'lines.json'), 'utf8')); } catch (_) { /* 沒有台詞表就當沒有語音 */ }
   try { files = fs.readdirSync(dir); } catch (_) { /* ignore */ }
-  return { lines, files };
+  return { lines, files, sub: i18n.voiceSub(settings.lang) };
 }
 
 // ---------- 語音工作室：在控制面板生成、試聽、採用 ----------
 const studio = require('./lib/voicestudio');
-const VOICE_DIR = path.join(__dirname, 'voice');
 const takes = new Map(); // 還沒採用的試聽音檔（記憶體裡，關掉面板或再生成就丟掉）
 let takeSeq = 0;
 const MIME = { mp3: 'audio/mpeg', wav: 'audio/wav', ogg: 'audio/ogg' };
@@ -411,7 +423,7 @@ function voiceReload() {
 
 // 調過音量、有原檔備份的句子（key_序號），面板用來決定要不要顯示「還原」
 function backupList() {
-  try { return fs.readdirSync(path.join(app.getPath('userData'), 'voice-original')).map((f) => f.replace(/\.[^.]+$/, '')); } catch (_) { return []; }
+  try { return fs.readdirSync(path.join(app.getPath('userData'), 'voice-original', i18n.voiceSub(settings.lang))).map((f) => f.replace(/\.[^.]+$/, '')); } catch (_) { return []; }
 }
 
 function setupVoiceIPC() {
@@ -421,7 +433,7 @@ function setupVoiceIPC() {
   ipcMain.handle('voice:read', (_e, key, i) => {
     const base = `${key}_${i + 1}`;
     for (const ext of ['mp3', 'ogg', 'wav']) {
-      const f = path.join(VOICE_DIR, `${base}.${ext}`);
+      const f = path.join(voiceDir(), `${base}.${ext}`);
       if (fs.existsSync(f)) return { bytes: fs.readFileSync(f), mime: MIME[ext] };
     }
     return null;
@@ -431,8 +443,9 @@ function setupVoiceIPC() {
   ipcMain.handle('voice:gen', async (_e, o) => {
     try {
       const line = { text: o.text, say: o.say };
-      const text = studio.spokenText(line, o.pad == null ? 1 : o.pad);
-      if (!text.replace(/…/g, '').trim()) throw new Error('沒有要唸的字');
+      const lang = i18n.norm(settings.lang);
+      const text = studio.spokenText(line, o.pad == null ? studio.defaultPad(lang) : o.pad, lang);
+      if (!text.replace(/…/g, '').trim()) throw new Error(T('沒有要唸的字'));
       takes.clear();
       const out = [];
       const n = Math.max(1, Math.min(5, o.takes | 0 || 1));
@@ -445,18 +458,18 @@ function setupVoiceIPC() {
       }
       return { text, takes: out };
     } catch (e) {
-      const hint = /fetch failed|ECONNREFUSED/.test(`${e.message} ${e.cause && (e.cause.code || e.cause.message)}`) ? `連不上 ${settings.voiceUrl}，請先啟動 Breeze-TTS` : e.message;
+      const hint = /fetch failed|ECONNREFUSED/.test(`${e.message} ${e.cause && (e.cause.code || e.cause.message)}`) ? T('連不上 {0}，請先啟動 Breeze-TTS', settings.voiceUrl) : e.message;
       return { error: hint };
     }
   });
 
   // 採用：改台詞表，有選定試聽版本就一併換掉音檔，然後讓撫子立刻重新載入
   // 直接改現有音檔的音量／還原（原檔備份在使用者資料夾，不會放進專案）
-  const VOICE_BACKUP = path.join(app.getPath('userData'), 'voice-original');
+  const voiceBackup = () => path.join(app.getPath('userData'), 'voice-original', i18n.voiceSub(settings.lang));
   ipcMain.handle('voice:gain', (_e, o) => {
     try {
-      if (o.restore) studio.restoreFile(VOICE_DIR, VOICE_BACKUP, o.key, o.i);
-      else studio.setFileGain(VOICE_DIR, VOICE_BACKUP, o.key, o.i, o.percent);
+      if (o.restore) studio.restoreFile(voiceDir(), voiceBackup(), o.key, o.i);
+      else studio.setFileGain(voiceDir(), voiceBackup(), o.key, o.i, o.percent);
       return { ok: true, ...voiceReload(), backups: backupList() };
     } catch (e) {
       return { error: e.message };
@@ -465,10 +478,10 @@ function setupVoiceIPC() {
   ipcMain.handle('voice:adopt', (_e, o) => {
     try {
       const wav = o.takeId ? takes.get(o.takeId) : null;
-      if (o.takeId && !wav) throw new Error('這個試聽版本已經過期，請重新生成');
-      studio.adopt(VOICE_DIR, o.key, o.i, o.entry, wav);
+      if (o.takeId && !wav) throw new Error(T('這個試聽版本已經過期，請重新生成'));
+      studio.adopt(voiceDir(), o.key, o.i, o.entry, wav);
       if (wav) { // 換了新音檔：舊的原檔備份作廢（之後調音量要從新音檔算）
-        for (const e of ['mp3', 'ogg', 'wav']) fs.rmSync(path.join(VOICE_BACKUP, `${o.key}_${o.i + 1}.${e}`), { force: true });
+        for (const e of ['mp3', 'ogg', 'wav']) fs.rmSync(path.join(voiceBackup(), `${o.key}_${o.i + 1}.${e}`), { force: true });
       }
       return { ok: true, ...voiceReload(), backups: backupList() };
     } catch (e) {
@@ -478,7 +491,9 @@ function setupVoiceIPC() {
 }
 
 function updateSetting(key, value) {
+  if (key === 'lang' && !i18n.LANGS.some(([k]) => k === value)) return;
   if (key === 'weatherTimes') value = weather.parseTimes(value).join(', ');
+  if (key === 'nightFrom' || key === 'nightTo') { value = weather.parseTimes(value)[0]; if (!value) return; }
   if (['rainAt', 'coldAt', 'hotAt'].includes(key)) { value = Number(value); if (!Number.isFinite(value)) return; }
   if (key === 'weatherPlace' && value != null && !(Number.isFinite(value.lat) && Number.isFinite(value.lon))) return;
   if ((key === 'birthday' || key === 'petBirthday') && !/^(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(String(value))) return;
@@ -488,6 +503,11 @@ function updateSetting(key, value) {
   }
   settings[key] = value;
   if (key === 'alwaysOnTop' && pet) applyOnTop();
+  if (key === 'lang') { // 換語言：語音換成那個語言的資料夾，面板標題、托盤一起換
+    voiceReload();
+    if (panel && !panel.isDestroyed()) panel.setTitle(T('撫子 控制面板'));
+    if (tray) tray.setToolTip(T('撫子'));
+  }
   if (key === 'size') return setSize(value);
   saveSettingsSoon();
   broadcastSettings();
@@ -497,14 +517,14 @@ function updateSetting(key, value) {
 // 每分鐘看一次：到了提醒時間（電腦睡著的話醒來 30 分鐘內補），今天這個時段還沒提醒過，就查天氣、演對應的動作
 async function checkWeather(show) {
   const p = settings.weatherPlace;
-  if (!p) return { error: '還沒設定城市' };
+  if (!p) return { error: T('還沒設定城市') };
   let r;
   try {
     r = weather.decide(await weather.forecast(p.lat, p.lon), settings);
   } catch (e) {
-    return { error: `查不到天氣（${e.message}）` };
+    return { error: T('查不到天氣（{0}）', e.message) };
   }
-  const text = weather.summary(r);
+  const text = weather.summary(r, T);
   settings.weatherLast = { at: new Date().toISOString(), text, kind: r ? r.kind : null };
   saveSettingsSoon();
   broadcastSettings();
@@ -632,7 +652,7 @@ const ACTIONS = [
   ['pray', '禱告'], ['doze', '坐著打盹'], ['standdoze', '站著打瞌睡'], ['curtsy', '提屈膝禮'],
   ['pirouette', '芭蕾：旋轉'], ['arabesque', '芭蕾：阿拉貝斯克'],
   ['pose', '擺姿勢'], ['nod', '點頭贊同'], ['shake', '搖頭困惑'], ['mail', '收信'], ['gift', '聖誕禮物'], ['birthday', '生日快樂'], ['lantern', '放天燈'], ['sparkler', '仙女棒'],
-  ['newyear', '新年拜年'], ['petbday', '撫子的生日'], ['dragonboat', '端午香包'], ['valentine', '情人節巧克力'], ['midautumn', '中秋賞月'], ['rainy', '下雨帶傘'], ['chilly', '天冷保暖'], ['hot', '天熱喝水'],
+  ['newyear', '新年拜年'], ['petbday', '撫子的生日'], ['dragonboat', '端午香包'], ['valentine', '情人節巧克力'], ['midautumn', '中秋賞月'], ['rainy', '下雨帶傘'], ['chilly', '天冷保暖'], ['hot', '天熱喝水'], ['bedtime', '深夜勸睡'],
 ];
 
 // 歌曲與樂曲：檔名（去掉副檔名）就是曲名；只在使用者自己點曲子時才演出
@@ -663,49 +683,54 @@ function songMenu(kind) {
   const where = SYNTH_KINDS.has(kind) ? 'app/scores' : ['app/music', MUSIC_SUB[kind]].filter(Boolean).join('/');
   return [
     ...(songs.length ? songs.map((s) => ({ label: s.title, click: () => send('pet:action', `${kind}:${s.file}`) }))
-      : [{ label: `（${where} 裡還沒有曲子）`, enabled: false }]),
+      : [{ label: T('（{0} 裡還沒有曲子）', where), enabled: false }]),
     { type: 'separator' },
-    { label: PLAIN_LABEL[kind], click: () => send('pet:action', kind) },
+    { label: T(PLAIN_LABEL[kind]), click: () => send('pet:action', kind) },
   ];
 }
 
 function menuTemplate() {
   // 尺寸、音量、頭上小字大小只放在控制面板（尺寸也可以 Ctrl＋滾輪），右鍵選單簡潔（祐 2026-11-08）
   return [
-    { label: '撫子', enabled: false },
+    { label: T('撫子'), enabled: false },
     { type: 'separator' },
-    { label: '動作', submenu: ACTIONS.map(([k, l]) => ({ label: l, click: () => send('pet:action', k) })) },
-    { label: '歌曲', submenu: songMenu('sing') },
-    { label: '小提琴', submenu: songMenu('violin') },
-    { label: '指揮', submenu: songMenu('conduct') },
-    { label: '豎琴', submenu: songMenu('harp') },
-    { label: '電子琴', submenu: songMenu('keys') },
+    { label: T('動作'), submenu: ACTIONS.map(([k, l]) => ({ label: T(l), click: () => send('pet:action', k) })) },
+    { label: T('歌曲'), submenu: songMenu('sing') },
+    { label: T('小提琴'), submenu: songMenu('violin') },
+    { label: T('指揮'), submenu: songMenu('conduct') },
+    { label: T('豎琴'), submenu: songMenu('harp') },
+    { label: T('電子琴'), submenu: songMenu('keys') },
     {
-      label: '測試狀態',
+      label: T('測試狀態'),
       submenu: [
-        { label: '自動（跟 Claude 連動）', type: 'radio', checked: forced == null, click: () => setForced(null) },
+        { label: T('自動（跟 Claude 連動）'), type: 'radio', checked: forced == null, click: () => setForced(null) },
         { type: 'separator' },
-        ...TEST_STATES.map(([k, l]) => ({ label: l, type: 'radio', checked: forced === k, click: () => setForced(k) })),
+        ...TEST_STATES.map(([k, l]) => ({ label: T(l), type: 'radio', checked: forced === k, click: () => setForced(k) })),
       ],
     },
     { type: 'separator' },
     {
-      label: '動作控制方式',
-      submenu: ACT_MODES.map(([k, l]) => ({ label: l, type: 'radio', checked: settings.actMode === k, click: () => updateSetting('actMode', k) })),
+      label: T('動作控制方式'),
+      submenu: ACT_MODES.map(([k, l]) => ({ label: T(l), type: 'radio', checked: settings.actMode === k, click: () => updateSetting('actMode', k) })),
     },
     // 走動、飛、坐視窗邊緣、語音、頭上小字、體力條、最上層這些開關只放在控制面板，右鍵選單保持乾淨（祐 2026-11-08）
     {
-      label: '開機自動啟動', type: 'checkbox',
-      checked: app.getLoginItemSettings().openAtLogin,
-      click: (i) => app.setLoginItemSettings({ openAtLogin: i.checked }),
+      label: T('開機自動啟動'), type: 'checkbox',
+      checked: app.getLoginItemSettings(LOGIN_ITEM).openAtLogin,
+      click: (i) => app.setLoginItemSettings({ openAtLogin: i.checked, ...LOGIN_ITEM }),
+    },
+    // 語言：選項用各自的語言寫，選單名稱也帶上「Language」，看不懂現在的語言也找得到（祐 2026-11-16）
+    {
+      label: i18n.norm(settings.lang) === 'en' ? 'Language' : `${T('語言')} / Language`,
+      submenu: i18n.LANGS.map(([k, l]) => ({ label: l, type: 'radio', checked: i18n.norm(settings.lang) === k, click: () => updateSetting('lang', k) })),
     },
     { type: 'separator' },
-    { label: '控制面板與模擬器…', click: openPanel },
-    { label: `喚醒（${(settings.hotkey || '').replace('CommandOrControl', 'Ctrl')}）`, click: summonPet },
-    { label: '回到螢幕右下角', click: resetPosition },
-    { label: '打開狀態資料夾', click: () => { fs.mkdirSync(bridge.stateDir(), { recursive: true }); shell.openPath(bridge.stateDir()); } },
+    { label: T('控制面板與模擬器…'), click: openPanel },
+    { label: T('喚醒（{0}）', (settings.hotkey || '').replace('CommandOrControl', 'Ctrl')), click: summonPet },
+    { label: T('回到螢幕右下角'), click: resetPosition },
+    { label: T('打開狀態資料夾'), click: () => { fs.mkdirSync(bridge.stateDir(), { recursive: true }); shell.openPath(bridge.stateDir()); } },
     { type: 'separator' },
-    { label: '結束', click: () => app.quit() },
+    { label: T('結束'), click: () => app.quit() },
   ];
 }
 
@@ -736,7 +761,7 @@ function openPanel() {
   if (panel && !panel.isDestroyed()) { panel.show(); panel.focus(); return; }
   panel = new BrowserWindow({
     // 羊皮紙卷軸當窗框：無邊框、透明，內容限制在紙面內（比例 560:778）
-    width: 560, height: 778, title: '撫子 控制面板', autoHideMenuBar: true,
+    width: 560, height: 778, title: T('撫子 控制面板'), autoHideMenuBar: true,
     frame: false, transparent: true, resizable: false, hasShadow: false,
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false },
   });
@@ -771,6 +796,11 @@ function setupIPC() {
   });
 
   ipcMain.on('pet:lantern', (_e, o) => launchLantern(o));
+  // 深夜被碰到：記下來，下次跟 Claude 說話時由 hook 帶進對話
+  ipcMain.on('pet:night-touch', (_e, kind) => {
+    if (!settings.nightOn || !settings.nightTell) return;
+    try { bridge.recordNightTouch(String(kind)); } catch (e) { console.error('night', e); }
+  });
   ipcMain.on('pet:move', (_e, x, y) => {
     if (!pet) return;
     placePet(x, y);
@@ -816,9 +846,9 @@ function setupIPC() {
   ipcMain.on('panel:set', (_e, key, value) => updateSetting(key, value));
   ipcMain.on('panel:force', (_e, k) => setForced(k || null));
   ipcMain.on('panel:action', (_e, k) => send('pet:action', k));
-  // 天氣：搜尋城市（用系統語言顯示地名）、現在查一次（有要提醒的就直接演給你看）
+  // 天氣：搜尋城市（用介面語言顯示地名：zh／ja／en）、現在查一次（有要提醒的就直接演給你看）
   ipcMain.handle('weather:search', async (_e, name) => {
-    try { return { list: await weather.geocode(name, (app.getLocale() || 'en').slice(0, 2)) }; } catch (e) { return { error: e.message }; }
+    try { return { list: await weather.geocode(name, i18n.norm(settings.lang).slice(0, 2)) }; } catch (e) { return { error: e.message }; }
   });
   ipcMain.handle('weather:check', () => checkWeather(true));
   ipcMain.handle('music:list', (_e, kind) => listSongs(kind));
@@ -859,11 +889,28 @@ function makeTray() {
   try {
     const icon = nativeImage.createFromPath(path.join(__dirname, 'assets', 'tray.png'));
     tray = new Tray(icon);
-    tray.setToolTip('撫子');
+    tray.setToolTip(T('撫子'));
     rebuildTray();
     tray.on('click', summonPet);
   } catch (e) {
     console.error('tray', e);
+  }
+}
+
+// 開機自動啟動（祐 2026-11-16 回報）：沒打包時是用 electron.exe 跑 app 資料夾，
+// 登錄只寫 electron.exe 的話，開機只會跳出 Electron 的「electron.exe path-to-app」說明小視窗。
+// 所以要把 app 資料夾當參數一起登錄。
+const LOGIN_ITEM = app.isPackaged ? {} : { path: process.execPath, args: [app.getAppPath()] };
+
+// 舊版（v0.8.7 以前）勾過的登錄沒有帶 app 資料夾：啟動時發現就改成正確的
+function fixLoginItem() {
+  if (app.isPackaged || process.platform !== 'win32') return;
+  try {
+    if (app.getLoginItemSettings().openAtLogin && !app.getLoginItemSettings(LOGIN_ITEM).openAtLogin) {
+      app.setLoginItemSettings({ openAtLogin: true, ...LOGIN_ITEM });
+    }
+  } catch (e) {
+    console.error('login item', e);
   }
 }
 
@@ -872,6 +919,7 @@ if (!app.requestSingleInstanceLock()) {
 } else {
   app.on('second-instance', summonPet);
   app.whenReady().then(() => {
+    fixLoginItem();
     loadSettings();
     bridge.pruneSessions();
     setupIPC();
