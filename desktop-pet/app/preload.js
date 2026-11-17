@@ -24,7 +24,17 @@ contextBridge.exposeInMainWorld('petHost', {
   onVoice: on('pet:voice'),
   lantern: (o) => ipcRenderer.send('pet:lantern', o),
   nightTouch: (kind) => ipcRenderer.send('pet:night-touch', kind),
+  onLetter: on('pet:letter'),
   readScore: (file) => ipcRenderer.sendSync('score:read', file),
+});
+
+// 記事板的信紙視窗（祐 2026-11-17）
+contextBridge.exposeInMainWorld('noteHost', {
+  init: () => ipcRenderer.invoke('note:init'),
+  status: (id, status, reason) => ipcRenderer.send('note:status', id, status, reason),
+  written: (ids) => ipcRenderer.send('note:written', ids),
+  close: () => ipcRenderer.send('note:close'),
+  onData: on('note:data'),
 });
 
 contextBridge.exposeInMainWorld('panelHost', {
@@ -34,6 +44,11 @@ contextBridge.exposeInMainWorld('panelHost', {
   action: (k) => ipcRenderer.send('panel:action', k),
   weatherSearch: (name) => ipcRenderer.invoke('weather:search', name),
   weatherCheck: () => ipcRenderer.invoke('weather:check'),
+  noteList: () => ipcRenderer.invoke('note:list'),
+  noteAdd: (o) => ipcRenderer.invoke('note:add', o),
+  noteDay: (date) => ipcRenderer.invoke('note:day', date),
+  noteRemove: (id) => ipcRenderer.invoke('note:remove', id),
+  noteOpen: () => ipcRenderer.send('note:open'),
   simHook: (input) => ipcRenderer.send('sim:hook', input),
   simUsage: (five, week) => ipcRenderer.send('sim:usage', five, week),
   simClear: () => ipcRenderer.send('sim:clear'),

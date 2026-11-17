@@ -23,6 +23,8 @@ const ACTION_LINES = {
   nod: '嗯嗯！', shake: '唔…不對吧？', mail: '有信來囉～', gift: '聖誕快樂～', birthday: '生日快樂～', lantern: '願望會實現的～', sparkler: '好漂亮～',
   newyear: '新年快樂～', petbday: '謝謝你遇見我～', dragonboat: '端午節快樂～', valentine: '情人節快樂…', midautumn: '中秋節快樂～', rainy: '記得帶傘喔～', chilly: '天冷了，記得保暖～', hot: '天熱了，記得多喝水～',
   bedtime: '很晚了，該睡了喔～',
+  noteadd: '幫你記下來了～', notedue: '時間到了喔～', noteopen: '來看看行程～', // 記事板（祐 2026-11-17）
+  bedtimelimit: '主人…你也該睡了。', // 深夜勸睡時她自己已經睡著／暈倒：動作不變，只說這句（祐 2026-11-17）
 };
 
 const S = {
@@ -131,7 +133,7 @@ function say(key, ms = 1800, opts = {}) {
   const line = chooseLine(key);
   const text = line ? line.text : (ACTION_LINES[key] ? T(ACTION_LINES[key]) : key);
   if (line && line.file && voiceReady(key)) playFile(line.file, line.vol);
-  if (!opts.mute) S.say = { text, until: performance.now() + ms };
+  if (!opts.mute) S.say = { text, until: performance.now() + ms, force: !!opts.force };
   return text;
 }
 
@@ -1503,7 +1505,8 @@ function onPointerMove(e) {
       drag.swing = 0; drag.swingV = 0; drag.vx = 0;
       host.dragStart(drag.grip.x, drag.grip.y);
       setMode(dragMode());
-      if (nightTouch('drag')) say('bedtime', 4000);
+      drag.night = nightTouch('drag');
+      if (drag.night) say(nightLimit() ? 'bedtimelimit' : 'bedtime', 4000, { force: true });
       S.lastInteraction = performance.now();
     }
     return;
@@ -1527,7 +1530,10 @@ function onPointerUp(e) {
   S.lastInteraction = performance.now();
   if (wasDrag) {
     host.dragEnd();
-    refreshGeom(true).then(() => setMode(fallMode()));
+    // 深夜被拎起來：落地站好後，一樣搖頭再打哈欠勸睡（撞上限的話落地後照常回去睡，不另外演）
+    const after = drag.night && !nightLimit() ? () => setMode(bedtimeMode()) : undefined;
+    drag.night = false;
+    refreshGeom(true).then(() => setMode(fallMode(after)));
     return;
   }
   if (performance.now() - d.t < 450) {
@@ -1537,11 +1543,12 @@ function onPointerUp(e) {
     clicks.push(nowT);
     const shy = clicks.length >= 3;
     if (shy) clicks = [];
-    const sleepy = nightTouch('click'); // 深夜被點：不跳開心，改成打哈欠勸你去睡
+    // 深夜被點：不跳開心，改成搖頭再打哈欠勸你去睡
+    if (nightTouch('click')) { clicks = []; nightReact(); return; }
     // 唱歌、拉琴、指揮時被點：停下來回到站姿（不跳開心）
-    if (mode && PERFORMING.has(mode.name)) { clicks = []; setMode(idleMode()); if (sleepy) say('bedtime', 4000); return; }
-    const kind = sleepy ? 'bedtime' : shy ? 'shy' : 'happy';
-    if (!sleepy) hearts(shy ? 3 : 2);
+    if (mode && PERFORMING.has(mode.name)) { clicks = []; setMode(idleMode()); return; }
+    const kind = shy ? 'shy' : 'happy';
+    hearts(shy ? 3 : 2);
     // 坐著／躺著被點會先起身；起身途中再點（連點兩下），不要打斷，排到站好之後再開心跳或害羞
     if (mode && (mode.name === 'rise' || mode.name === 'wake')) { mode.after = () => poseMode(kind); return; }
     const react = () => setMode(poseMode(kind));
@@ -1569,8 +1576,8 @@ function detectStroke(x) {
   if (stroke.flips >= 3 && (!mode || mode.name !== 'pat')) {
     S.lastInteraction = now;
     stroke.flips = 0;
-    const sleepy = nightTouch('pat');
-    const go = () => { setMode(patMode()); if (sleepy) say('bedtime', 4000); };
+    if (nightTouch('pat')) { nightReact(); return; } // 深夜摸頭也一樣勸睡
+    const go = () => setMode(patMode());
     // 在空中被摸頭：一樣先飄落再撒嬌
     if (!onGround()) { if (mode && mode.name !== 'fall') setMode(fallMode(go)); return; }
     go();
@@ -1606,27 +1613,109 @@ function patMode() {
   };
 }
 
-// ---------- 深夜勸睡（祐 2026-11-16）----------
+// ---------- 記事板（祐 2026-11-17）----------
+// 信紙打開時：她開書、拿白羽毛筆寫字（整理記憶那組 compactdown → compactloop），信紙收起才闔書化光（compactup）。
+// 天氣提醒跟行程同時間的話，闔上書之後才演天氣的動作（after）。
+// 放著沒處理（待處理）時主程序會叫她先收工（pose:false），信紙留著。撞到上限（睡覺、暈倒）時不起來，只開信紙。
+const letter = { open: false, pose: false, after: null };
+function letterMode(reason) {
+  const seq = CLAUDE_SEQ.compacting;
+  let t0 = -1;
+  return {
+    name: 'letter',
+    emote: true,
+    rise: seq.rise,
+    enter() {
+      ensureClip(seq.down); ensureClip(seq.loop); ensureClip(seq.rise);
+      say(reason === 'add' ? 'noteadd' : reason === 'due' ? 'notedue' : 'noteopen', 3000, { force: true });
+    },
+    update(dt, t) {
+      if (!letter.open || !letter.pose) {
+        if (letter.after) { const k = letter.after; letter.after = null; freeQueue = () => poseMode(k); }
+        return false; // 換下一個動作時 setMode 會先播闔書（rise）
+      }
+      if (t0 < 0) { if (ensureClip(seq.down) || !waitingClip(seq.down) || t > 3) t0 = t; else return true; }
+      if (lieView(seq.down, seq.loop, t - t0, 0)) return true;
+      view.sprite = 'idle';
+      breathe(t);
+      return true;
+    },
+  };
+}
+
+// ---------- 深夜勸睡（祐 2026-11-16；2026-11-17 晚改版）----------
 // 設定的時段裡（預設 01:00～05:00）碰到她都算：滑鼠在她身上滑過、點、摸頭、拎起來。
-// 她會打哈欠說「該睡了」（10 分鐘最多一次）；也請主程序記下來，下次跟 Claude 說話時由 hook 帶進對話。
-const NIGHT_REACT_MS = 10 * 60 * 1000;
+// 每次都會勸（祐 2026-11-17：不要間隔）：先搖頭（不行喔），再打哈欠，整段頭上都是勸睡的話；
+// 拎起來的話，抓著時先說，落地站好後再搖頭、打哈欠。
+// 她自己已經撞到上限（5 小時用完在睡覺、週上限暈倒）：動作不變，只說「主人…你也該睡了。」
+// 也請主程序記下來，下次跟 Claude 說話時由 hook 帶進對話。
 const NIGHT_SEND_MS = 30 * 1000;
 const NIGHT_HOVER_MS = 800;   // 滑鼠在她身上移動超過這麼久才算「摸到」，路過不算
-const night = { reactAt: -1e12, sent: {}, hoverSince: 0, lastMove: 0 };
+const night = { sent: {}, hoverSince: 0, lastMove: 0 };
 
 function isNightNow() {
   const s = S.settings;
   return !!(s && s.nightOn && core.inNight(new Date(), s.nightFrom, s.nightTo));
 }
 
-// 回傳 true＝這次要勸睡（冷卻中就只記錄、不演）
+// 回傳 true＝現在是勸睡時段（順便記下這次碰觸，同一種 30 秒內只報一次）
 function nightTouch(kind) {
   if (!isNightNow()) return false;
   const now = performance.now();
   if (now - (night.sent[kind] || -1e12) > NIGHT_SEND_MS) { night.sent[kind] = now; host.nightTouch(kind); }
-  if (now - night.reactAt < NIGHT_REACT_MS) return false;
-  night.reactAt = now;
   return true;
+}
+
+// 撞到額度：5 小時用完（睡覺）或週上限（暈倒）
+function nightLimit() {
+  const b = claudeState().body;
+  return b === 'exhausted' || b === 'faint';
+}
+
+// 搖頭 → 打哈欠；頭上一直是勸睡的話（Claude 工作中、疲憊時也先演完）
+function bedtimeMode() {
+  const T1 = clipSeconds('shake') || 2.2;
+  const T2 = clipSeconds('yawn') || 2.6;
+  let t0 = -1;
+  return {
+    name: 'bedtime',
+    emote: true,
+    enter() {
+      say('bedtime', (T1 + T2) * 1000 + 1500, { force: true });
+      ensureClip('shake'); ensureClip('yawn');
+    },
+    update(dt, t) {
+      // 兩段片段都載好（或等超過 1 秒）才開始計時，免得搖頭被吃掉一截
+      if (t0 < 0) {
+        if ((ensureClip('shake') && ensureClip('yawn')) || t > 1) t0 = t;
+        else return true;
+      }
+      const u = t - t0;
+      if (u < T1) {
+        if (playClip('shake', u, { base: 'idle', fadeIn: 0.2 })) return true;
+        view.sprite = 'idle';
+        view.rot = Math.sin(u * Math.PI * 3) * 0.03; // 沒有片段：用站姿左右晃一晃當搖頭
+        return true;
+      }
+      const v = u - T1;
+      view.rot = 0;
+      if (playClip('yawn', v, { base: 'idle', fadeOut: 0.3, dur: T2 })) return v < T2;
+      view.sprite = 'yawn';
+      return v < T2;
+    },
+  };
+}
+
+// 深夜被點、被摸、被滑過：照她現在的樣子決定怎麼勸
+function nightReact() {
+  if (nightLimit()) { say('bedtimelimit', 4000, { force: true }); return; } // 自己都睡了／暈了：只說一句，不起來
+  if (!mode) { setMode(bedtimeMode()); return; }
+  if (mode.name === 'bedtime') return;                                      // 正在勸，不重來
+  if (mode.name === 'drag' || mode.name === 'fall') { say('bedtime', 4000, { force: true }); return; }
+  if (mode.name === 'rise' || mode.name === 'wake') { mode.after = bedtimeMode; return; } // 起身途中：站好再勸
+  if (mode.lying) { setMode(bedtimeMode()); if (mode.name === 'wake') mode.after = bedtimeMode; return; } // 自己在打盹：先爬起來
+  if (!onGround()) { setMode(fallMode(() => setMode(bedtimeMode()))); return; } // 飛著、坐在視窗邊：先落地
+  setMode(bedtimeMode());
 }
 
 function hoverNight(solid) {
@@ -1636,10 +1725,8 @@ function hoverNight(solid) {
   night.lastMove = now;
   if (!solid || now - night.hoverSince < NIGHT_HOVER_MS) return;
   night.hoverSince = now; // 一段滑動只算一次
-  if (!nightTouch('hover')) return;
-  // 站著、走著就停下來打哈欠；其他動作（坐著、睡著、表演中）只說一句，不打斷
-  if (mode && (mode.name === 'idle' || mode.name === 'walk') && onGround()) setMode(poseMode('bedtime'));
-  else say('bedtime', 4000);
+  if (drag.down) return;  // 按著滑鼠（準備拎、正在拎）交給拖曳處理
+  if (nightTouch('hover')) nightReact();
 }
 
 function setHover(v) {
@@ -1750,7 +1837,7 @@ function updateBubble(r) {
   let text = '';
   const now = performance.now();
   const interacting = mode && INTERACTIONS.has(mode.name);
-  if (S.say && S.say.until > now && (interacting || r.body === 'free')) text = S.say.text;
+  if (S.say && S.say.until > now && (interacting || r.body === 'free' || S.say.force)) text = S.say.text;
   else if (r.body !== 'free') text = core.bubbleText(r, Date.now(), T);
   else if (mode && mode.name === 'nap') text = 'Zzz…';
 
@@ -1836,6 +1923,22 @@ async function start() {
     }
   });
   host.onAction((k) => runAction(k));
+  host.onLetter((o) => {
+    if (!o) return;
+    if (o.open) {
+      letter.open = true;
+      letter.pose = o.pose !== false;
+      if (!letter.pose || (mode && mode.name === 'letter') || nightLimit()) return;
+      S.lastInteraction = performance.now();
+      const make = () => letterMode(o.reason);
+      if (mode && (mode.name === 'drag' || mode.name === 'fall')) { freeQueue = make; return; } // 拎著、掉下來：落地後再開書
+      if (!onGround()) setMode(fallMode(() => setMode(make()))); else setMode(make());
+      return;
+    }
+    letter.open = false;
+    if (mode && mode.name === 'letter') { letter.after = o.after || null; return; } // 闔書後才演天氣
+    if (o.after) runAction(o.after);
+  });
   // 撫子（Claude）回覆時叫的動作：tools/act.js 寫 act.json → 主程序轉過來。
   // 短動作在 Claude 工作中也會先演完再回去工作（mode.emote 讓狀態機先等一下）；say＝頭上要顯示的字
   host.onEmote((e) => {
@@ -1854,7 +1957,7 @@ async function start() {
       return;
     }
     const base = k === 'walk' ? walkMode : k === 'fly' ? flyMode : k === 'sit' ? sitMode : k === 'doze' ? dozeMode : k === 'standdoze' ? standDozeMode : k === 'pose' ? posingMode : k === 'pray' ? prayMode : k === 'nap' ? lieMode : k === 'wake' ? wakeMode : k === 'perch' ? () => perchMode({ manual: true, stay: !!emote })
-      : k === 'perch_lie' ? () => perchMode({ manual: true, stay: !!emote, only: 'lie' }) : () => poseMode(k);
+      : k === 'perch_lie' ? () => perchMode({ manual: true, stay: !!emote, only: 'lie' }) : k === 'bedtime' ? bedtimeMode : () => poseMode(k);
     const make = emote && EMOTE_SHORT.has(k) ? () => Object.assign(base(), { emote: true }) : base;
     if (k !== 'fly' && !onGround()) { setMode(fallMode(() => setMode(make()))); return; }
     setMode(make());

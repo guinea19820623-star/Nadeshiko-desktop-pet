@@ -31,7 +31,7 @@ test('日文、英文字典的句子一樣多（少翻一邊會被抓到），�
 
 test('程式裡 T(\'…\') 用到的句子，字典都有', () => {
   const miss = [];
-  for (const rel of ['main.js', 'renderer/pet.js', 'renderer/panel.js', 'lib/statecore.js', 'lib/weather.js']) {
+  for (const rel of ['main.js', 'renderer/pet.js', 'renderer/panel.js', 'renderer/note.js', 'lib/statecore.js', 'lib/weather.js']) {
     const src = fs.readFileSync(path.join(APP, rel), 'utf8');
     for (const m of src.matchAll(/\bT\('([^'\r\n]*)'/g)) {
       if (/[一-鿿]/.test(m[1]) && !(m[1] in i18n.DICT.en)) miss.push(`${rel}: ${m[1]}`);

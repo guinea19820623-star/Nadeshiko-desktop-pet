@@ -41,6 +41,11 @@
   button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
   button.on { outline: 2px solid var(--accent); }
   .hint { color: var(--muted); font-size: 12px; margin: 4px 0 0; }
+  .nb-item { display: flex; align-items: center; gap: 8px; margin: 3px 0; font-size: 13px; }
+  .nb-item .t { flex: 0 0 auto; color: var(--muted); }
+  .nb-item .x { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .nb-item .d { flex: 0 0 auto; color: var(--muted); font-size: 12px; }
+  .nb-item button { flex: 0 0 auto; padding: 1px 8px; }
   pre { background: var(--chip); border-radius: 5px; padding: 8px; font-size: 11px; max-height: 120px; overflow: auto; margin: 6px 0 0; white-space: pre-wrap; user-select: text; }
   .vline { border-top: 1px dashed var(--line); padding-top: 8px; margin-top: 8px; }
   .vline:first-of-type { border-top: 0; padding-top: 0; margin-top: 4px; }
@@ -61,7 +66,19 @@
   .take .warn { color: #a23a1a; font-size: 12px; }
   .vmsg { font-size: 12px; margin: 4px 0 0; min-height: 1.4em; }
   .vmsg.err { color: #a23a1a; }
-  label.check { display: flex; gap: 6px; align-items: center; }
+  /* 打勾的選項句子比較長（例如「也告訴 Claude（…）」）：可以換行，不要超出紙面（祐 2026-11-17） */
+  label.check { display: flex; gap: 6px; align-items: flex-start; white-space: normal; min-width: 0; line-height: 1.45; }
+  label.check input { margin-top: 3px; }
+  /* 記事板：手動排定（月／日＋時間＋事項），點清單裡的行程可以改 */
+  #nb-pend { flex: 0 0 auto; }
+  #nb-time { flex: 0 0 5em !important; }
+  .nb-form { border-top: 1px dashed var(--line); margin-top: 8px; padding-top: 6px; }
+  .nb-same { display: flex; flex-wrap: wrap; gap: 6px; margin: 2px 0 4px; font-size: 12px; color: var(--muted); }
+  .nb-same:empty { display: none; }
+  .nb-same button { padding: 1px 8px; font-size: 12px; }
+  .nb-btns button { flex: 0 0 auto; white-space: nowrap; }
+  .nb-item .x { cursor: pointer; }
+  .nb-item.editing .x { color: var(--accent); font-weight: bold; }
 </style>
 </head>
 <body>
@@ -108,7 +125,24 @@
     <div class="row"><label class="check"><input type="checkbox" id="nt-on"> 啟用（這段時間碰到她，她會打哈欠勸你去睡）</label></div>
     <div class="row"><label for="nt-from">時段</label><input type="text" id="nt-from" placeholder="01:00" style="width:5em">～<input type="text" id="nt-to" placeholder="05:00" style="width:5em"></div>
     <div class="row"><label class="check"><input type="checkbox" id="nt-tell"> 也告訴 Claude（下次跟 Claude 說話時，帶上「幾點還在碰桌寵」）</label></div>
-    <p class="hint">滑鼠在她身上滑過、點一下、摸頭、拎起來都算；勸睡 10 分鐘最多一次。時段可以跨過午夜（例如 23:30～04:00），輪班的話照自己的睡覺時間改。只記時間和碰了哪裡，存在本機的 ~/.nadeshiko-pet/night.json。</p>
+    <p class="hint">滑鼠在她身上滑過、點一下、摸頭、拎起來都算，每次都會勸：先搖頭再打哈欠（拎起來的話落地後再勸）。她自己撞到上限睡著或暈倒時，只會說一句「主人…你也該睡了。」。時段可以跨過午夜（例如 23:30～04:00），輪班的話照自己的睡覺時間改。只記時間和碰了哪裡，存在本機的 ~/.nadeshiko-pet/night.json。</p>
+  </section>
+
+  <section class="wx">
+    <h2>記事板</h2>
+    <div class="row"><label class="check"><input type="checkbox" id="nb-on"> 啟用（行程到時間，她打開信紙提醒你）</label></div>
+    <div class="row"><label for="nb-pend">待處理</label><input type="number" id="nb-pend" min="1" max="240"><span>分鐘沒處理就標「待處理」</span></div>
+    <div class="row"><label for="noteWidth">信紙寬度</label><input id="noteWidth" type="range" min="240" max="560" step="10"><output id="noteWidth-out"></output></div>
+    <div id="nb-list"></div>
+    <div class="nb-form">
+      <div class="row"><label for="nb-month">日期</label><span style="display:flex;align-items:center;gap:6px"><select id="nb-month" style="width:auto;flex:0 0 auto"></select>月<select id="nb-day" style="width:auto;flex:0 0 auto"></select>日</span></div>
+      <div class="row"><label for="nb-time">時間</label><input type="text" id="nb-time" placeholder="15:00" maxlength="5"><select id="nb-days" style="width:auto;flex:0 0 auto"><option value="date">只有這天</option><option value="">每天</option><option value="平日">平日</option><option value="週末">週末</option></select></div>
+      <div id="nb-same" class="nb-same"></div>
+      <div class="row"><label for="nb-text">事項</label><input type="text" id="nb-text" placeholder="要做的事" maxlength="40"></div>
+      <div class="row nb-btns"><button id="nb-add" class="primary">排定</button><button id="nb-new">清空</button><span id="nb-msg" class="hint"></span></div>
+    </div>
+    <div class="row"><button id="nb-open">打開記事板</button></div>
+    <p class="hint">也可以請撫子（Claude）代筆：node tools/schedule.js add 15:00 出門上班 --days 1-5。到時間會打開信紙；點事項可以選完成（劃線）或變更（劃線並寫原因）。跟天氣提醒同一個時間的話，天氣寫在信紙上面。行程存在本機的 ~/.nadeshiko-pet/schedule.json。</p>
   </section>
 
   <section>

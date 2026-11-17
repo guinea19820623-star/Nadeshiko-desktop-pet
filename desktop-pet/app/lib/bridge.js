@@ -262,7 +262,24 @@ function takeNightNote(now = Date.now()) {
     + '這是桌寵自動記下的。如果對方現在還沒睡，可以用你平常的口吻，溫柔提醒對方早點休息；已經是白天了就輕輕帶過，不用說教。';
 }
 
+// ---------- 通知種類紀錄（祐 2026-11-17）----------
+// 用量到 85% 時對話框會跳出使用量警告。想知道這個警告有沒有透過 Notification hook 送過來
+// （有的話桌寵就能自己累，不用靠人提醒），所以把每一種見過的通知記下來：種類、次數、最後一次的時間與文字。
+// 只存在本機的 notifications.json，最多 40 種。
+function noteNotification(input, now = Date.now()) {
+  if (!input || input.hook_event_name !== 'Notification') return null;
+  const type = String(input.notification_type || 'unknown').slice(0, 60);
+  const file = path.join(stateDir(), 'notifications.json');
+  const d = readJSON(file) || {};
+  const cur = d[type] || { n: 0 };
+  d[type] = { n: cur.n + 1, last: now, message: String(input.message || '').slice(0, 200), title: input.title ? String(input.title).slice(0, 80) : undefined };
+  const keys = Object.keys(d);
+  if (keys.length > 40) for (const k of keys.sort((a, b) => d[a].last - d[b].last).slice(0, keys.length - 40)) delete d[k];
+  writeJSON(file, d);
+  return d[type];
+}
+
 module.exports = {
   stateDir, writeJSON, readJSON, mapHookEvent, applyHookEvent, applyStatusline, readQuota,
-  readSnapshot, pruneSessions, safeId, requestAction, takeAction, recordNightTouch, takeNightNote,
+  readSnapshot, pruneSessions, safeId, requestAction, takeAction, recordNightTouch, takeNightNote, noteNotification,
 };

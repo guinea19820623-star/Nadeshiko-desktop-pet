@@ -115,6 +115,9 @@ function render() {
   $('wx-place').textContent = settings.weatherPlace ? T('目前地點：{0}', settings.weatherPlace.label) : T('還沒設定城市（搜尋後選一個）');
   if (document.activeElement !== $('wx-times')) $('wx-times').value = settings.weatherTimes || '';
   for (const k of ['rainAt', 'coldAt', 'hotAt']) if (document.activeElement !== $(k)) $(k).value = settings[k];
+  // 記事板
+  $('nb-on').checked = settings.noteOn !== false;
+  if (document.activeElement !== $('nb-pend')) $('nb-pend').value = settings.notePendingMin || 10;
   // 深夜勸睡
   $('nt-on').checked = settings.nightOn !== false;
   $('nt-tell').checked = settings.nightTell !== false;
@@ -126,6 +129,125 @@ function render() {
 }
 
 const WX_LABEL = { rainy: '下雨帶傘', chilly: '天冷保暖', hot: '天熱喝水' };
+
+// 記事板（祐 2026-11-17）：行程清單＋手動排定（月／日、時間、事項，跟生日同款的下拉選單）
+// 那天那個時間已經排了東西，就把原本的事項帶出來改；點清單裡的行程也可以改。排定後桌寵會打開信紙，用羽毛筆寫上去。
+const nb = { edit: null, items: [] };
+const pad2 = (n) => String(n).padStart(2, '0');
+// 選的月／日 → 日期（已經過了的日子當作明年）
+function nbDate() {
+  const now = new Date();
+  const m = Number($('nb-month').value), d = Number($('nb-day').value);
+  let y = now.getFullYear();
+  const pick = new Date(y, m - 1, d);
+  if (pick.getMonth() !== m - 1) return null; // 2/30 這種
+  if (pick < new Date(now.getFullYear(), now.getMonth(), now.getDate())) y += 1;
+  return `${y}-${pad2(m)}-${pad2(d)}`;
+}
+const nbTime = () => { const m = /^\s*(\d{1,2})\s*[:：]\s*(\d{2})\s*$/.exec($('nb-time').value); return m && Number(m[1]) < 24 && Number(m[2]) < 60 ? `${pad2(Number(m[1]))}:${m[2]}` : null; };
+const DAYS_KEY = (it) => (it.date ? 'date' : !it.days || !it.days.length ? '' : it.days.join() === '1,2,3,4,5' ? '平日' : it.days.join() === '0,6' ? '週末' : '');
+
+function nbSetEdit(it) {
+  nb.edit = it ? it.id : null;
+  $('nb-add').textContent = T(it ? '修改' : '排定');
+  for (const r of document.querySelectorAll('.nb-item')) r.classList.toggle('editing', r.dataset.id === nb.edit);
+}
+
+// 把一筆行程帶進表單來改
+function nbLoad(it) {
+  if (it.date) { const [, m, d] = it.date.split('-'); $('nb-month').value = m; $('nb-day').value = d; }
+  $('nb-time').value = it.time;
+  $('nb-days').value = DAYS_KEY(it);
+  $('nb-month').disabled = $('nb-day').disabled = $('nb-days').value !== 'date';
+  $('nb-text').value = it.text;
+  nbSetEdit(it);
+  nbSame();
+}
+
+// 這天排了哪些：列在時間下面，點一下帶出來改；時間對上的那筆直接帶出原本的事項
+async function nbSame() {
+  const tok = (nb.tok = (nb.tok || 0) + 1); // 連續觸發（換月、換時間）時只畫最後一次，免得列兩遍
+  const box = $('nb-same');
+  box.innerHTML = '';
+  const date = nbDate();
+  if (!date || $('nb-days').value !== 'date') return;
+  const list = await host.noteDay(date);
+  if (tok !== nb.tok) return;
+  box.innerHTML = '';
+  if (!list.length) return;
+  const lead = document.createElement('span');
+  lead.textContent = T('這天排定的：');
+  box.appendChild(lead);
+  for (const it of list) {
+    const b = document.createElement('button');
+    b.textContent = `${it.time} ${it.text}`;
+    b.onclick = () => nbLoad(it);
+    box.appendChild(b);
+  }
+  const t = nbTime();
+  const hit = t && list.find((x) => x.time === t);
+  if (hit && nb.edit !== hit.id) { $('nb-text').value = hit.text; nbSetEdit(hit); }
+  else if (!hit && nb.edit && list.some((x) => x.id === nb.edit) && t) nbSetEdit(null); // 換了時間：變成另一筆新的
+}
+
+async function refreshNotes() {
+  const list = $('nb-list');
+  nb.items = await host.noteList();
+  list.innerHTML = '';
+  if (!nb.items.length) { const p = document.createElement('div'); p.className = 'hint'; p.textContent = T('（還沒有行程）'); list.appendChild(p); return; }
+  const loc = PetI18n.norm(settings.lang) === 'ja' ? 'ja-JP' : PetI18n.norm(settings.lang) === 'en' ? 'en-US' : 'zh-TW';
+  const wd = (n) => new Intl.DateTimeFormat(loc, { weekday: 'short' }).format(new Date(2026, 10, 15 + n)); // 2026-11-15 是週日
+  for (const it of nb.items) {
+    const row = document.createElement('div');
+    row.className = 'nb-item';
+    row.dataset.id = it.id;
+    const when = it.date ? T('只有 {0}', it.date) : it.days && it.days.length ? (it.days.join() === '1,2,3,4,5' ? T('平日') : it.days.join() === '0,6' ? T('週末') : T('每週 {0}', it.days.map(wd).join('、'))) : T('每天');
+    row.innerHTML = '<span class="t"></span><span class="x"></span><span class="d"></span><button></button>';
+    row.querySelector('.t').textContent = it.time;
+    row.querySelector('.x').textContent = it.text;
+    row.querySelector('.x').title = T('點一下可以修改');
+    row.querySelector('.x').onclick = () => nbLoad(it);
+    row.querySelector('.d').textContent = when;
+    const del = row.querySelector('button');
+    del.textContent = T('刪除');
+    del.onclick = async () => { await host.noteRemove(it.id); if (nb.edit === it.id) nbClear(); refreshNotes(); nbSame(); };
+    list.appendChild(row);
+  }
+  nbSetEdit(nb.items.find((x) => x.id === nb.edit) || null);
+}
+
+function nbClear() {
+  $('nb-text').value = '';
+  $('nb-msg').textContent = '';
+  nbSetEdit(null);
+}
+
+function bindNotes() {
+  $('nb-on').onchange = (e) => host.set('noteOn', e.target.checked);
+  $('nb-pend').onchange = (e) => host.set('notePendingMin', e.target.value);
+  $('nb-open').onclick = () => host.noteOpen();
+  const fillSel = (sel, n) => { sel.innerHTML = ''; for (let i = 1; i <= n; i++) { const o = document.createElement('option'); o.value = pad2(i); o.textContent = i; sel.appendChild(o); } };
+  fillSel($('nb-month'), 12);
+  fillSel($('nb-day'), 31);
+  const now = new Date();
+  $('nb-month').value = pad2(now.getMonth() + 1);
+  $('nb-day').value = pad2(now.getDate());
+  for (const id of ['nb-month', 'nb-day', 'nb-days']) $(id).onchange = () => { $('nb-month').disabled = $('nb-day').disabled = $('nb-days').value !== 'date'; nbSame(); };
+  $('nb-time').onchange = nbSame;
+  $('nb-new').onclick = nbClear;
+  $('nb-add').onclick = async () => {
+    const days = $('nb-days').value;
+    const date = days === 'date' ? nbDate() : null;
+    if ((days === 'date' && !date) || !nbTime() || !$('nb-text').value.trim()) { $('nb-msg').textContent = T('時間要像 15:00，事項不能是空的'); return; }
+    const r = await host.noteAdd({ id: nb.edit, time: nbTime(), text: $('nb-text').value, date, days: days === 'date' ? '' : days });
+    if (r && r.error) { $('nb-msg').textContent = T('時間要像 15:00，事項不能是空的'); return; }
+    nbClear();
+    $('nb-msg').textContent = T('排好了，她會寫在信紙上');
+    await refreshNotes();
+    nbSame();
+  };
+  refreshNotes().then(nbSame);
+}
 
 function bindNight() {
   $('nt-on').onchange = (e) => host.set('nightOn', e.target.checked);
@@ -186,6 +308,8 @@ async function main() {
   $('actMode').onchange = (e) => host.set('actMode', e.target.value);
   bindWeather();
   bindNight();
+  bindNotes();
+  bindRange('noteWidth', 'noteWidth', (v) => `${v}px`);
   // 主人的生日：月、日兩個下拉選單（預設 1 月 1 日，選了就存 MM-DD），「啟用」打勾才會在生日那天捧蛋糕
   const fill = (sel, n) => {
     sel.innerHTML = '';

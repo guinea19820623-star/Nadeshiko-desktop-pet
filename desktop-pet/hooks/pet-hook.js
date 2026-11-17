@@ -3,8 +3,8 @@
 // Claude Code hook：把事件寫成撫子看得懂的狀態檔。
 // 設定在 ~/.claude/settings.json（用 tools/install-claude.js 自動加）。
 // 一律 exit 0，所以絕不會擋到 Claude。
-// 只有一種情況會輸出：UserPromptSubmit 時，桌寵記到使用者半夜還在碰她（深夜勸睡），
-// 用 additionalContext 帶進對話，讓 Claude 知道（祐 2026-11-16）。
+// 只有 UserPromptSubmit 時會輸出：桌寵記到使用者半夜還在碰她（深夜勸睡，祐 2026-11-16），
+// 或記事板的行程有了結果（完成、變更、待處理，祐 2026-11-17），用 additionalContext 帶進對話，讓 Claude 知道。
 // 桌寵自己在背景請 Claude 說一句話時（深夜勸睡的即時回應），那次呼叫不算「Claude 在工作」：
 // 桌寵會帶 NADESHIKO_PET_SILENT=1，這裡直接離開，不寫狀態、也不輸出。
 if (process.env.NADESHIKO_PET_SILENT) process.exit(0);
@@ -18,8 +18,12 @@ process.stdin.on('end', () => {
   try {
     const input = JSON.parse(raw || '{}');
     const m = bridge.applyHookEvent(input);
+    if (input.hook_event_name === 'Notification') bridge.noteNotification(input); // 記下見過哪些通知（找用量警告用）
     if (input.hook_event_name === 'UserPromptSubmit') {
-      const note = bridge.takeNightNote();
+      // 深夜小報告＋記事板的結果（完成、變更、待處理，祐 2026-11-17），有就一起帶進對話
+      let sched = null;
+      try { sched = require('../app/lib/schedule').takeNote(); } catch (_) { /* 記事板壞掉也不影響其他 */ }
+      const note = [bridge.takeNightNote(), sched].filter(Boolean).join('\n');
       // 用同步寫入：後面馬上 process.exit，非同步的 stdout 在管線上可能來不及送出
       if (note) require('fs').writeSync(1, JSON.stringify({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: note } }));
     }

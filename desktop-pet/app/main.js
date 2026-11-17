@@ -9,6 +9,7 @@ const bridge = require('./lib/bridge');
 const { layout } = require('./lib/statecore');
 const weather = require('./lib/weather');
 const i18n = require('./lib/i18n');
+const schedule = require('./lib/schedule');
 
 const BUBBLE_H = layout(250).bubbleH; // 視窗上方留給頭上小字的高度
 const SIZE_MIN = 100;
@@ -54,6 +55,10 @@ const DEFAULT_SETTINGS = {
   nightTo: '05:00',
   nightTell: true,
   lang: 'zh-TW',           // 介面與語音的語言：zh-TW／ja／en（祐 2026-11-16）
+  // 記事板（祐 2026-11-17）：行程到時間打開信紙；放著幾分鐘沒處理標「待處理」；信紙寬度（px）
+  noteOn: true,
+  notePendingMin: 10,
+  noteWidth: 320,
 };
 
 let settings = { ...DEFAULT_SETTINGS };
@@ -494,6 +499,8 @@ function updateSetting(key, value) {
   if (key === 'lang' && !i18n.LANGS.some(([k]) => k === value)) return;
   if (key === 'weatherTimes') value = weather.parseTimes(value).join(', ');
   if (key === 'nightFrom' || key === 'nightTo') { value = weather.parseTimes(value)[0]; if (!value) return; }
+  if (key === 'notePendingMin') { value = Math.max(1, Math.min(240, Math.round(Number(value)))); if (!Number.isFinite(value)) return; }
+  if (key === 'noteWidth') { value = Math.max(240, Math.min(560, Math.round(Number(value)))); if (!Number.isFinite(value)) return; }
   if (['rainAt', 'coldAt', 'hotAt'].includes(key)) { value = Number(value); if (!Number.isFinite(value)) return; }
   if (key === 'weatherPlace' && value != null && !(Number.isFinite(value.lat) && Number.isFinite(value.lon))) return;
   if ((key === 'birthday' || key === 'petBirthday') && !/^(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(String(value))) return;
@@ -540,6 +547,198 @@ async function weatherTick() {
   settings.weatherFired = { ...(settings.weatherFired || {}), [slot]: weather.dayKey(now) };
   saveSettingsSoon();
   await checkWeather(true);
+}
+
+// ---------- 記事板（祐 2026-11-17）----------
+// 桌寵自己當鬧鐘（不靠 Claude，不花用量）；撫子用 tools/schedule.js 代筆，行程存在狀態資料夾的 schedule.json。
+// 時間到了：她開書拿羽毛筆寫字（整理記憶那組動作），旁邊打開信紙，筆把該做的事寫上去。
+// 點事項：完成（劃線）／變更（劃線＋寫原因）。開著 notePendingMin 分鐘沒處理就標「待處理」。
+// 天氣提醒跟行程同一個時間：天氣寫進信紙最上面，關上信紙、她闔上書之後才演天氣的動作。
+let note = null;        // { win, date, write, due, weather, pen, pendTimer }
+let noteMtime = -1;
+
+const noteFileMtime = () => { try { return fs.statSync(schedule.file()).mtimeMs; } catch (_) { return 0; } };
+function saveSchedule(data) {
+  schedule.save(data);
+  noteMtime = noteFileMtime(); // 自己寫的不算「外面改了」
+}
+
+// 這筆行程最近哪天會用到（今天起一週內）；只有那天的就是那天
+function nextDay(item, now = new Date()) {
+  if (item.date) return item.date;
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() + i);
+    if (!item.days || !item.days.length || item.days.includes(d.getDay())) return schedule.dayKey(d);
+  }
+  return schedule.dayKey(now);
+}
+
+function notePayload() {
+  const data = schedule.load();
+  const [y, m, d] = note.date.split('-').map(Number);
+  return {
+    date: note.date, items: schedule.itemsFor(data, new Date(y, m - 1, d)),
+    write: note.write, due: note.due, weather: note.weather, pen: note.pen, lang: settings.lang,
+  };
+}
+
+function pushNote() {
+  if (note && !note.win.isDestroyed()) note.win.webContents.send('note:data', notePayload());
+}
+
+// 信紙放在撫子旁邊（左邊放得下就放左邊），底部對齊她的腳
+function noteBounds() {
+  const W = Math.max(240, Math.min(560, Math.round(Number(settings.noteWidth) || 320)));
+  const width = Math.round(W * 1.24), height = Math.round(W * 1.5 + W * 0.22); // 右邊、上面留給羽毛筆
+  const pb = pet && !pet.isDestroyed() ? pet.getBounds() : null;
+  const wa = (pb ? displayFor(pb) : screen.getPrimaryDisplay()).workArea;
+  let x = wa.x + wa.width - width - 40, y = wa.y + wa.height - height;
+  if (pb) {
+    const feet = pb.y + pb.height;
+    y = Math.max(wa.y, Math.min(feet - height, wa.y + wa.height - height));
+    const left = Math.round(pb.x + pb.width * 0.2 - width);
+    x = left >= wa.x ? left : Math.round(pb.x + pb.width * 0.8);
+    x = Math.max(wa.x, Math.min(x, wa.x + wa.width - width));
+  }
+  return { x, y, width, height };
+}
+
+// o：{ date?, write?: [id], due?: [id], weather?: { text, kind }, reason: 'due'|'add'|'manual' }
+function openNote(o = {}) {
+  const date = o.date || schedule.dayKey(new Date());
+  if (note && !note.win.isDestroyed() && note.date === date) {
+    note.write = [...new Set([...(note.write || []), ...(o.write || [])])];
+    note.due = [...new Set([...(note.due || []), ...(o.due || [])])];
+    if (o.weather) note.weather = o.weather;
+    pushNote();
+    note.win.showInactive();
+  } else {
+    if (note && !note.win.isDestroyed()) note.win.destroy();
+    const win = new BrowserWindow({
+      ...noteBounds(),
+      transparent: true, frame: false, resizable: false, minimizable: false, maximizable: false,
+      fullscreenable: false, skipTaskbar: true, hasShadow: false, show: false, title: T('記事板'),
+      backgroundColor: '#00000000',
+      webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, backgroundThrottling: false },
+    });
+    win.setAlwaysOnTop(true, 'screen-saver');
+    note = { win, date, write: o.write || [], due: o.due || [], weather: o.weather || null, pen: Math.random() < 0.5 ? 'a' : 'b', pendTimer: null };
+    const mine = note;
+    win.once('ready-to-show', () => { if (!win.isDestroyed()) win.showInactive(); }); // 不搶走正在打字的焦點
+    win.on('closed', () => { if (note === mine) closeNote(); });
+    win.loadFile(path.join(__dirname, 'renderer', 'note.html'));
+  }
+  // 時間到的提醒：放著 notePendingMin 分鐘沒處理，標「待處理」，她也闔上書回去做自己的事
+  if (o.reason === 'due') {
+    clearTimeout(note.pendTimer);
+    const mine = note;
+    note.pendTimer = setTimeout(() => {
+      if (note !== mine) return;
+      const data = schedule.load();
+      for (const x of schedule.itemsFor(data, new Date())) if (mine.due.includes(x.id) && !x.s) schedule.setStatus(data, mine.date, x.id, 'pending');
+      saveSchedule(data);
+      pushNote();
+      send('pet:letter', { open: true, pose: false });
+    }, Math.max(1, Number(settings.notePendingMin) || 10) * 60 * 1000);
+  }
+  send('pet:letter', { open: true, pose: true, reason: o.reason || 'manual' }); // 她開書、拿羽毛筆寫字，直到信紙收起來
+}
+
+function closeNote() {
+  const n = note;
+  if (!n) return;
+  note = null;
+  clearTimeout(n.pendTimer);
+  if (!n.win.isDestroyed()) n.win.destroy();
+  send('pet:letter', { open: false, after: n.weather && n.weather.kind ? n.weather.kind : null });
+}
+
+// 撫子代筆加了新的行程 → 打開信紙，筆寫上去（每 0.6 秒看一次檔案有沒有變）
+function noteCheckFile() {
+  const m = noteFileMtime();
+  if (m === noteMtime) return;
+  const first = noteMtime < 0;
+  noteMtime = m;
+  if (!settings.noteOn) return;
+  const data = schedule.load();
+  const fresh = schedule.unwritten(data);
+  if (fresh.length) {
+    const date = nextDay(fresh[0]);
+    const [y, mo, d] = date.split('-').map(Number);
+    const day = new Date(y, mo - 1, d);
+    const here = fresh.filter((x) => schedule.itemsFor(data, day).some((i) => i.id === x.id)).map((x) => x.id);
+    schedule.markWritten(data, fresh.filter((x) => !here.includes(x.id)).map((x) => x.id)); // 別天的不寫，記成寫過
+    if (here.length < fresh.length) saveSchedule(data);
+    openNote({ date, write: here, reason: 'add' });
+  } else if (!first) {
+    pushNote();
+  }
+}
+
+// 每分鐘：有行程到時間就打開信紙；天氣提醒同一個時間的話一起查、寫進信紙
+async function noteTick() {
+  if (!settings.noteOn) return;
+  const now = new Date();
+  const data = schedule.load();
+  const due = schedule.dueItems(data, now);
+  if (!due.length) return;
+  schedule.markFired(data, due.map((x) => x.id), now);
+  saveSchedule(data);
+  let wx = null;
+  if (settings.weatherOn && settings.weatherPlace) {
+    const slot = weather.dueSlot(weather.parseTimes(settings.weatherTimes), now, settings.weatherFired || {});
+    if (slot && due.some((x) => x.time === slot)) {
+      settings.weatherFired = { ...(settings.weatherFired || {}), [slot]: weather.dayKey(now) };
+      saveSettingsSoon();
+      const r = await checkWeather(false);
+      if (r && r.text) wx = { text: r.text, kind: r.kind || null };
+    }
+  }
+  openNote({ date: schedule.dayKey(now), due: due.map((x) => x.id), weather: wx, reason: 'due' });
+}
+
+async function minuteTick() {
+  try { await noteTick(); } catch (e) { console.error('note', e); }
+  await weatherTick();
+}
+
+function setupNoteIPC() {
+  ipcMain.handle('note:init', () => (note ? notePayload() : null));
+  ipcMain.on('note:status', (_e, id, status, reason) => {
+    if (!note || !['done', 'changed', 'pending', null].includes(status)) return;
+    const data = schedule.load();
+    schedule.setStatus(data, note.date, String(id), status, reason);
+    saveSchedule(data);
+  });
+  ipcMain.on('note:written', (_e, ids) => {
+    if (!Array.isArray(ids)) return;
+    const data = schedule.load();
+    schedule.markWritten(data, ids.map(String));
+    saveSchedule(data);
+    if (note) note.write = note.write.filter((x) => !ids.includes(x));
+  });
+  ipcMain.on('note:close', () => closeNote());
+  // 控制面板：行程清單、加一筆、刪一筆、打開記事板
+  ipcMain.handle('note:list', () => schedule.load().items.sort((a, b) => a.time.localeCompare(b.time)));
+  // o：{ id?（有就是修改那筆）, time, text, date?（只有那天）, days?（''＝每天、'平日'、'週末'、'1-5'…） }
+  ipcMain.handle('note:add', (_e, o) => {
+    try {
+      o = o || {};
+      const data = schedule.load();
+      const item = { time: o.time, text: o.text, date: o.date || undefined, days: o.date ? undefined : schedule.parseDays(o.days) };
+      if (o.id) schedule.updateItem(data, String(o.id), item); else schedule.addItem(data, item);
+      schedule.save(data); // 不更新 noteMtime：讓下一輪看到新行程，打開信紙寫上去
+      return { ok: true };
+    } catch (e) { return { error: e.message }; }
+  });
+  ipcMain.handle('note:day', (_e, date) => {
+    const d = schedule.normDate(date);
+    if (!d) return [];
+    const [y, m, dd] = d.split('-').map(Number);
+    return schedule.itemsFor(schedule.load(), new Date(y, m - 1, dd));
+  });
+  ipcMain.handle('note:remove', (_e, id) => { const data = schedule.load(); const ok = schedule.removeItem(data, String(id)); saveSchedule(data); pushNote(); return ok; });
+  ipcMain.on('note:open', () => openNote({ reason: 'manual' }));
 }
 
 // 「保持在最上層」：用最高的層級（screen-saver），瀏覽器或影片全螢幕時才比較不會被蓋住；
@@ -609,6 +808,7 @@ function pollAction() {
   const a = bridge.takeAction(lastActId);
   if (!a) return;
   lastActId = a.id;
+  if (a.action === 'note') { openNote({ reason: 'manual' }); return; } // 撫子叫的「打開記事板」（tools/schedule.js show）
   if (settings.actMode === 'random') return; // 「隨機」模式不接撫子的動作
   // 唱歌、小提琴、指揮、豎琴、電子琴：在該資料夾找曲名含 song 的第一首（找不到就只做動作）；跟使用者自己點曲子走同一條
   if (MUSIC_SUB[a.action] != null || SYNTH_KINDS.has(a.action)) {
@@ -623,6 +823,7 @@ function pollAction() {
 
 function pollSnapshot() {
   pollAction();
+  try { noteCheckFile(); } catch (e) { console.error('note', e); }
   const snap = bridge.readSnapshot();
   const json = JSON.stringify(snap);
   if (json !== lastSnapshotJSON) {
@@ -695,6 +896,7 @@ function menuTemplate() {
     { label: T('撫子'), enabled: false },
     { type: 'separator' },
     { label: T('動作'), submenu: ACTIONS.map(([k, l]) => ({ label: T(l), click: () => send('pet:action', k) })) },
+    { label: T('記事板'), click: () => openNote({ reason: 'manual' }) },
     { label: T('歌曲'), submenu: songMenu('sing') },
     { label: T('小提琴'), submenu: songMenu('violin') },
     { label: T('指揮'), submenu: songMenu('conduct') },
@@ -782,6 +984,7 @@ function setupIPC() {
   }));
 
   setupVoiceIPC();
+  setupNoteIPC();
 
   ipcMain.handle('pet:windows', () => listWindows());
 
@@ -926,8 +1129,8 @@ if (!app.requestSingleInstanceLock()) {
     createPet();
     makeTray();
     setInterval(pollSnapshot, 600);
-    setInterval(weatherTick, 60 * 1000);
-    setTimeout(weatherTick, 15 * 1000);
+    setInterval(minuteTick, 60 * 1000); // 記事板與天氣提醒（記事板先看，同時間的天氣併進信紙）
+    setTimeout(minuteTick, 15 * 1000);
     setInterval(() => { if (settings.alwaysOnTop && pet && !pet.isDestroyed() && pet.isVisible()) pet.moveTop(); }, 3000);
     if (process.argv.includes('--panel')) openPanel();
     registerHotkey();

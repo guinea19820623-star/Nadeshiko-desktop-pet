@@ -49,5 +49,9 @@
  "rainy": [{"text": "Don't forget your umbrella~"}, {"text": "It might rain today"}, {"text": "Don't get wet, and take care on the way"}],
  "chilly": [{"text": "It's cold, keep warm~"}, {"text": "Remember to bring your scarf"}, {"text": "Dress warmly before you go out"}],
  "hot": [{"text": "It's hot, drink plenty of water~"}, {"text": "Take some water with you"}, {"text": "Don't get heatstroke, stay hydrated"}],
- "bedtime": [{"text": "It's late. Time for bed~"}, {"text": "Caught you~ still not asleep?"}, {"text": "You'll be tired tomorrow, so go to sleep"}]
+ "bedtime": [{"text": "It's late~Time for bed~", "pad": 0}, {"text": "Caught you~ still not asleep?"}, {"text": "Master, go to sleep quickly", "pad": 0}],
+ "bedtimelimit": [{"text": "Master… you should get some sleep too."}, {"text": "Master… please get some rest too."}],
+ "noteadd": [{"text": "I wrote it down for you~"}, {"text": "All written down, don't forget~"}],
+ "notedue": [{"text": "It's time~"}, {"text": "Time to get going~"}],
+ "noteopen": [{"text": "Let's look at your plans~"}, {"text": "What's on for today~"}]
 }
