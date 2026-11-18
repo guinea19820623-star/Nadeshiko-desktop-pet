@@ -6,9 +6,9 @@ v0.8 起，**所有動作都是祐用「圖生影片 → 切成精靈幀」重�
 
 ![各種狀態](images/states.jpg)
 
-- 下載：[desktop-pet.zip（最新版，約 156MB）](https://github.com/guinea19820623-star/Nadeshiko.github.io/releases/latest/download/desktop-pet.zip)　~~downloads/desktop-pet.zip（約 72MB）~~ 下載檔超過 GitHub 單檔 100MB 上限，v0.8.2 起改放 [Releases](https://github.com/guinea19820623-star/Nadeshiko.github.io/releases)
+- 下載：[desktop-pet.zip（最新版，約 156MB）](https://github.com/guinea19820623-star/Nadeshiko-desktop-pet/releases/latest/download/desktop-pet.zip)　~~downloads/desktop-pet.zip（約 72MB）~~ 下載檔超過 GitHub 單檔 100MB 上限，v0.8.2 起改放 [Releases](https://github.com/guinea19820623-star/Nadeshiko-desktop-pet/releases)
 - 完整說明：[desktop-pet/README.md](desktop-pet/README.md)
-- 網站：<https://guinea19820623-star.github.io/Nadeshiko.github.io/>
+- 網站：<https://guinea19820623-star.github.io/Nadeshiko-desktop-pet/>（~~guinea19820623-star.github.io/Nadeshiko.github.io/~~ 倉庫 2026-11-18 改名為 Nadeshiko-desktop-pet，舊網址已失效）
 
 ## 快速開始（Windows）
 1. 解壓縮 `desktop-pet.zip`（需要 Node.js 20 以上）
