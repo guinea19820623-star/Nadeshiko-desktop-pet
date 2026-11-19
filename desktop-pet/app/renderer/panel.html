@@ -116,8 +116,9 @@
     <div class="row"><label>下雨帶傘：降雨機率 ≥</label><input type="number" id="rainAt" min="10" max="100" step="5">%</div>
     <div class="row"><label>天冷保暖：最低溫 ≤</label><input type="number" id="coldAt" min="-30" max="30" step="1">°C</div>
     <div class="row"><label>天熱喝水：最高溫 ≥</label><input type="number" id="hotAt" min="15" max="50" step="1">°C</div>
+    <div class="row"><label for="skyWidth">天氣框寬度</label><input id="skyWidth" type="range" min="260" max="640" step="10"><output id="skyWidth-out"></output></div>
     <div class="row"><button id="wx-check">現在查一次</button><span class="hint" id="wx-last" style="margin:0"></span></div>
-    <p class="hint">同名的地方很多時會列出來讓你選；中文找不到或找錯，就改用英文（例如 Tainan、Hsinchu）。提醒時間建議填出門前一小時。下雨優先；沒有雨再看冷熱。只會送出城市的經緯度，查不到天氣時就不提醒。天氣資料：Open-Meteo.com</p>
+    <p class="hint">同名的地方很多時會列出來讓你選；中文找不到或找錯，就改用英文（例如 Tainan、Hsinchu）。提醒時間建議填出門前一小時。結果寫在星空天氣框裡，點一下收起，30 分鐘沒人點會自己淡出；右鍵選單的「天氣提醒」隨時可以查。下雨和冷熱會一起提醒（例如撐傘再圍圍巾）。只會送出城市的經緯度，排定的時間查不到天氣就不提醒。天氣資料：Open-Meteo.com</p>
   </section>
 
   <section class="wx">

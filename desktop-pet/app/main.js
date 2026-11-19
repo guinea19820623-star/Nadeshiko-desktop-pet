@@ -39,7 +39,8 @@ const DEFAULT_SETTINGS = {
   petBirthday: '03-30', // 撫子的生日「MM-DD」（祐 2026-11-14：她 3/30 醒來；其他人可以改成與桌寵見面的日子）
   petBirthdayOn: true,
   birthdayOn: false, // 打勾才啟用：生日那天開機、喚醒時撫子捧生日蛋糕出來（預設不開，免得每個人 1 月 1 日都收到蛋糕）
-  // 天氣提醒（2026-11-15）：設定城市後，在提醒時間查接下來 12 小時，下雨帶傘 ＞ 天冷保暖 ＞ 天熱喝水
+  // 天氣提醒（2026-11-15）：設定城市後，在提醒時間查接下來 12 小時，下雨帶傘、天冷保暖／天熱喝水（下雨和冷熱可以一起，2026-11-19）
+  // 結果寫在星空天氣框裡（2026-11-19）；右鍵選單「天氣提醒」隨時查一次
   weatherOn: false,
   weatherPlace: null,      // { label, lat, lon }：控制面板搜尋城市後選的
   weatherTimes: '07:30',   // 可以填好幾個，例如「07:00, 15:00, 23:00」（出門前一小時）
@@ -48,6 +49,7 @@ const DEFAULT_SETTINGS = {
   hotAt: 32,               // 最高溫 ≥ 這個 °C 提醒喝水
   weatherFired: {},        // 每個時段今天提醒過了沒（重開不會再提醒一次）
   weatherLast: null,       // 最近一次查詢的結果，控制面板顯示
+  skyWidth: 380,           // 星空天氣框的寬度（px）
   // 深夜勸睡（祐 2026-11-16）：這個時段裡碰到她（滑鼠滑過、點、摸頭、拎起來），她會打哈欠勸你去睡；
   // nightTell 打勾的話，也記下來，下次跟 Claude 說話時帶進對話
   nightOn: true,
@@ -159,6 +161,7 @@ function createPet() {
   pet.setIgnoreMouseEvents(true, { forward: true });
   pet.loadFile(path.join(__dirname, 'renderer', 'index.html'));
   pet.on('closed', () => { pet = null; app.quit(); });
+  pet.on('move', followSky); // 星空天氣框跟著她
 }
 
 // 放天燈（祐 2026-11-12）：從撫子手上飄走的天燈是獨立的透明小視窗，滑鼠穿透。
@@ -500,6 +503,7 @@ function updateSetting(key, value) {
   if (key === 'weatherTimes') value = weather.parseTimes(value).join(', ');
   if (key === 'nightFrom' || key === 'nightTo') { value = weather.parseTimes(value)[0]; if (!value) return; }
   if (key === 'notePendingMin') { value = Math.max(1, Math.min(240, Math.round(Number(value)))); if (!Number.isFinite(value)) return; }
+  if (key === 'skyWidth') { value = Math.max(260, Math.min(640, Math.round(Number(value)))); if (!Number.isFinite(value)) return; }
   if (key === 'noteWidth') { value = Math.max(240, Math.min(560, Math.round(Number(value)))); if (!Number.isFinite(value)) return; }
   if (['rainAt', 'coldAt', 'hotAt'].includes(key)) { value = Number(value); if (!Number.isFinite(value)) return; }
   if (key === 'weatherPlace' && value != null && !(Number.isFinite(value.lat) && Number.isFinite(value.lon))) return;
@@ -522,21 +526,103 @@ function updateSetting(key, value) {
 
 // ---------- 天氣提醒 ----------
 // 每分鐘看一次：到了提醒時間（電腦睡著的話醒來 30 分鐘內補），今天這個時段還沒提醒過，就查天氣、演對應的動作
-async function checkWeather(show) {
+// show：打開星空天氣框、她演對應的動作（下雨又冷＝撐傘再圍圍巾）；manual：使用者自己按的，查不到也要說
+async function checkWeather(show, manual) {
   const p = settings.weatherPlace;
-  if (!p) return { error: T('還沒設定城市') };
+  if (!p) {
+    if (manual) openSky({ error: T('還沒設定城市'), hint: T('在控制面板的「天氣提醒」設定') });
+    return { error: T('還沒設定城市') };
+  }
   let r;
   try {
     r = weather.decide(await weather.forecast(p.lat, p.lon), settings);
   } catch (e) {
-    return { error: T('查不到天氣（{0}）', e.message) };
+    const msg = T('查不到天氣（{0}）', e.message);
+    if (manual) openSky({ error: msg, place: p });
+    return { error: msg };
   }
   const text = weather.summary(r, T);
   settings.weatherLast = { at: new Date().toISOString(), text, kind: r ? r.kind : null };
   saveSettingsSoon();
   broadcastSettings();
-  if (r && r.kind && show) send('pet:action', r.kind);
+  if (show) openSky({ r, place: p });
   return { text, kind: r ? r.kind : null };
+}
+
+// ---------- 星空天氣框（祐 2026-11-19）----------
+// 古希臘大理石框＋帕德嫩神廟的星空；記事板的羽毛筆用亮金色的字把天氣寫上去。點一下收起，30 分鐘沒人點自己淡出。
+let sky = null; // { win, payload, side }
+const shortPlace = (p) => (p && p.label ? String(p.label).split('，')[0] : '');
+
+// 放在撫子旁邊（左邊放得下就放左邊），大約在她胸口的高度；她走動、被拎走時框跟著她（side：上次放哪一邊，放得下就不換邊）
+function skyBounds(side) {
+  const F = Math.max(260, Math.min(640, Math.round(Number(settings.skyWidth) || 380)));
+  const width = Math.round(F * 1.2), height = Math.round(F * 0.24 + F * 2 / 3);
+  const pb = pet && !pet.isDestroyed() ? pet.getBounds() : null;
+  const wa = (pb ? displayFor(pb) : screen.getPrimaryDisplay()).workArea;
+  let x = wa.x + wa.width - width - 40, y = wa.y + wa.height - height;
+  if (pb) {
+    y = Math.round(pb.y + pb.height * 0.72 - height);
+    y = Math.max(wa.y, Math.min(y, wa.y + wa.height - height));
+    const left = Math.round(pb.x + pb.width * 0.22 - F), right = Math.round(pb.x + pb.width * 0.78);
+    const fitsL = left >= wa.x, fitsR = right + width <= wa.x + wa.width;
+    side = side === 'right' ? (fitsR || !fitsL ? 'right' : 'left') : (fitsL || !fitsR ? 'left' : 'right');
+    x = side === 'left' ? left : right;
+    x = Math.max(wa.x, Math.min(x, wa.x + wa.width - width));
+  }
+  return { x, y, width, height, side };
+}
+
+function followSky() {
+  if (!sky || sky.win.isDestroyed()) return;
+  const { side, ...b } = skyBounds(sky.side);
+  sky.side = side;
+  const now = sky.win.getBounds();
+  if (now.x !== b.x || now.y !== b.y) sky.win.setBounds(b);
+}
+
+// o：{ r?（weather.decide 的結果）, place?, error?, hint? }
+function openSky(o = {}) {
+  if (sky && !sky.win.isDestroyed()) sky.win.destroy();
+  sky = null;
+  const d = o.error ? { lines: [o.error], tips: o.hint ? [o.hint] : [] } : weather.details(o.r, T);
+  const payload = {
+    lang: settings.lang, pen: Math.random() < 0.5 ? 'a' : 'b',
+    place: shortPlace(o.place), sub: o.error ? '' : T('接下來 {0} 小時', weather.HOURS),
+    lines: d.lines, tips: d.tips,
+  };
+  const { side, ...bounds } = skyBounds();
+  const win = new BrowserWindow({
+    ...bounds,
+    transparent: true, frame: false, resizable: false, minimizable: false, maximizable: false,
+    fullscreenable: false, skipTaskbar: true, hasShadow: false, show: false, focusable: true, title: T('天氣提醒'),
+    backgroundColor: '#00000000',
+    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, backgroundThrottling: false },
+  });
+  win.setAlwaysOnTop(true, 'screen-saver');
+  win.setIgnoreMouseEvents(true, { forward: true }); // 透明的地方點擊穿過去，滑到框上才接住（sky.js 決定）
+  const mine = { win, payload, side };
+  sky = mine;
+  win.once('ready-to-show', () => { if (!win.isDestroyed()) win.showInactive(); });
+  win.on('closed', () => { if (sky === mine) sky = null; });
+  win.loadFile(path.join(__dirname, 'renderer', 'sky.html'));
+  // 她一起演：下雨又冷就撐傘、接著圍圍巾（筆先飄進來，稍等一下再開始）
+  const kind = o.r && o.r.kind;
+  if (kind) setTimeout(() => send('pet:action', kind), 700);
+}
+
+function closeSky() {
+  const s = sky;
+  sky = null;
+  if (s && !s.win.isDestroyed()) s.win.destroy();
+}
+
+function setupSkyIPC() {
+  ipcMain.handle('sky:init', (e) => (sky && e.sender === sky.win.webContents ? sky.payload : null));
+  ipcMain.on('sky:close', () => closeSky());
+  ipcMain.on('sky:ignore', (e, v) => {
+    if (sky && e.sender === sky.win.webContents && !sky.win.isDestroyed()) sky.win.setIgnoreMouseEvents(!!v, { forward: true });
+  });
 }
 
 async function weatherTick() {
@@ -897,6 +983,7 @@ function menuTemplate() {
     { type: 'separator' },
     { label: T('動作'), submenu: ACTIONS.map(([k, l]) => ({ label: T(l), click: () => send('pet:action', k) })) },
     { label: T('記事板'), click: () => openNote({ reason: 'manual' }) },
+    { label: T('天氣提醒'), click: () => checkWeather(true, true) },
     { label: T('歌曲'), submenu: songMenu('sing') },
     { label: T('小提琴'), submenu: songMenu('violin') },
     { label: T('指揮'), submenu: songMenu('conduct') },
@@ -985,6 +1072,7 @@ function setupIPC() {
 
   setupVoiceIPC();
   setupNoteIPC();
+  setupSkyIPC();
 
   ipcMain.handle('pet:windows', () => listWindows());
 
@@ -1053,7 +1141,7 @@ function setupIPC() {
   ipcMain.handle('weather:search', async (_e, name) => {
     try { return { list: await weather.geocode(name, i18n.norm(settings.lang).slice(0, 2)) }; } catch (e) { return { error: e.message }; }
   });
-  ipcMain.handle('weather:check', () => checkWeather(true));
+  ipcMain.handle('weather:check', () => checkWeather(true, true));
   ipcMain.handle('music:list', (_e, kind) => listSongs(kind));
   // 樂譜（同步讀，只讀 app/scores/ 底下的 .json，檔名不能有路徑）
   ipcMain.on('score:read', (e, file) => {

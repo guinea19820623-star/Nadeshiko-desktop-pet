@@ -1,0 +1,46 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<!-- 星空天氣框（祐 2026-11-19）：古希臘大理石回紋框，裡面是帕德嫩神廟的星空夜景（祐用 GPT 生成，assets/weather/sky.webp，3:2）。
+     記事板的白羽毛筆飄過來，用亮金色的字把天氣寫在星空上。點一下收起；沒人理 30 分鐘自己淡出。
+     版面以框寬 F 為單位：視窗寬 1.2F、高 0.24F + 框高（2/3F）；框在左下，上面和右邊留給羽毛筆。 -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'">
+<style>
+  html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; user-select: none; }
+  body { opacity: 0; transform: translateY(8px) scale(.985); transition: opacity .5s ease, transform .5s ease; }
+  body.show { opacity: 1; transform: none; }
+  body.bye { opacity: 0; transform: translateY(6px); transition-duration: .45s; }
+  body.fade { opacity: 0; transition: opacity 2.5s ease; }
+  #frame { position: absolute; left: 0; display: block; pointer-events: none; filter: drop-shadow(0 4px 10px rgba(20,20,60,.28)); }
+  #hit { position: absolute; left: 0; cursor: pointer; }
+  #text { position: absolute; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; pointer-events: none; }
+  #text.zh { font-family: "DFKai-SB", "BiauKai", "標楷體", "KaiTi", serif; }
+  #text.ja { font-family: "Yu Mincho", "YuMincho", "Hiragino Mincho ProN", serif; }
+  #text.en { font-family: "Palatino Linotype", "Book Antiqua", Palatino, serif; font-style: italic; }
+  .ln { display: inline-block; white-space: nowrap; line-height: 1.35; padding: 0 .15em; }
+  /* 亮金色的字：金色漸層＋外面一圈柔光 */
+  .gold { background: linear-gradient(180deg, #fffbe2 0%, #ffe39a 38%, #f2c260 70%, #d9a040 100%); -webkit-background-clip: text; background-clip: text; color: transparent;
+          filter: drop-shadow(0 0 2px rgba(255,226,140,.95)) drop-shadow(0 0 7px rgba(255,196,90,.55)); }
+  .gold.done { animation: shimmer 4.5s ease-in-out infinite; }
+  @keyframes shimmer {
+    0%, 100% { filter: drop-shadow(0 0 2px rgba(255,226,140,.95)) drop-shadow(0 0 7px rgba(255,196,90,.55)); }
+    50% { filter: drop-shadow(0 0 3px rgba(255,238,170,1)) drop-shadow(0 0 12px rgba(255,206,110,.8)) brightness(1.12); }
+  }
+  .place { font-size: .7em; letter-spacing: .1em; margin-bottom: .3em; }
+  .rule { width: 0; height: 1px; margin: .3em 0 .35em; background: linear-gradient(90deg, transparent, rgba(255,214,120,.9), transparent); transition: width .8s ease; }
+  .rule.on { width: 46%; }
+  .tip { font-size: 1.04em; }
+  #fx { position: absolute; left: 0; top: 0; pointer-events: none; z-index: 8; }
+  #pen { position: absolute; left: 0; top: 0; pointer-events: none; z-index: 10; filter: drop-shadow(0 0 6px rgba(255,230,160,.45)) drop-shadow(1px 2px 2px rgba(20,20,60,.3)); }
+</style>
+</head>
+<body>
+<img id="frame" src="../assets/weather/sky.webp" alt="">
+<div id="hit"></div>
+<div id="text"></div>
+<canvas id="fx"></canvas>
+<img id="pen" alt="">
+<script src="sky.js"></script>
+</body>
+</html>

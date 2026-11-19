@@ -433,6 +433,16 @@ function idleMode(duration = rand(5, 12), sprite = 'idle') {
 // 歡呼：Claude 完成時用循環版 cheer，自己歡呼整段播一次 cheerall（最後放下手回站姿）
 const POSE_CLIP = { yawn: 'yawn', stretch: 'stretch', wave: 'wave', cheer: 'cheerall', nap: 'sleep', pose: 'pose', shy: 'shy', happy: 'happy', curtsy: 'curtsy', pirouette: 'pirouette', arabesque: 'arabesque', nod: 'nod', shake: 'shake', mail: 'mail', gift: 'gift', birthday: 'birthday', lantern: 'lantern', sparkler: 'sparkler', newyear: 'newyear', petbday: 'petbday', dragonboat: 'dragonboat', valentine: 'valentine', midautumn: 'midautumn', rainy: 'rainy', chilly: 'chilly', hot: 'hot', bedtime: 'yawn' };
 
+// 好幾個姿勢接著演（天氣：'rainy+chilly'＝撐傘、接著圍圍巾，祐 2026-11-19）
+function kindsMode(list) {
+  const m = poseMode(list[0]);
+  if (list.length > 1) {
+    const enter = m.enter;
+    m.enter = function () { enter.call(this); freeQueue = () => kindsMode(list.slice(1)); };
+  }
+  return m;
+}
+
 // 定點姿勢（打哈欠、伸懶腰、揮手…）
 function poseMode(kind, duration) {
   const conf = {
@@ -1631,7 +1641,7 @@ function letterMode(reason) {
     },
     update(dt, t) {
       if (!letter.open || !letter.pose) {
-        if (letter.after) { const k = letter.after; letter.after = null; freeQueue = () => poseMode(k); }
+        if (letter.after) { const k = letter.after; letter.after = null; freeQueue = () => kindsMode(k.split('+')); }
         return false; // 換下一個動作時 setMode 會先播闔書（rise）
       }
       if (t0 < 0) { if (ensureClip(seq.down) || !waitingClip(seq.down) || t > 3) t0 = t; else return true; }
@@ -1953,6 +1963,13 @@ async function start() {
     const [pk, ...rest] = k.split(':');
     if (PERFORMING.has(pk)) {
       const make = () => performMode(pk, rest.join(':') || null);
+      if (!onGround()) setMode(fallMode(() => setMode(make()))); else setMode(make());
+      return;
+    }
+    if (k.includes('+')) { // 好幾種天氣：一個接一個
+      const list = k.split('+').filter((x) => POSE_CLIP[x]);
+      if (!list.length) return;
+      const make = () => kindsMode(list);
       if (!onGround()) setMode(fallMode(() => setMode(make()))); else setMode(make());
       return;
     }

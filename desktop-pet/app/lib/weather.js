@@ -57,7 +57,8 @@ async function forecast(lat, lon) {
   return getJSON(url);
 }
 
-// 預報 → 要提醒哪一種。先看下雨，沒雨再看溫度（冷、熱）
+// 預報 → 要提醒哪幾種。下雨和冷熱可以一起（祐 2026-11-19：下雨又冷就撐傘再圍圍巾）；
+// kinds＝['rainy','chilly'] 這樣的陣列，kind＝用「+」接起來的字串（'rainy+chilly'），沒有就是 null
 function decide(fc, th = {}) {
   const h = (fc && fc.hourly) || {};
   const nums = (a) => (Array.isArray(a) ? a.slice(0, HOURS).filter((v) => typeof v === 'number') : []);
@@ -66,10 +67,25 @@ function decide(fc, th = {}) {
   if (!temp.length && !rain.length) return null;
   const r = { rain: rain.length ? Math.max(...rain) : null, tmin: temp.length ? Math.min(...temp) : null, tmax: temp.length ? Math.max(...temp) : null, kind: null };
   const rainAt = th.rainAt ?? 60, coldAt = th.coldAt ?? 15, hotAt = th.hotAt ?? 32;
-  if (r.rain != null && r.rain >= rainAt) r.kind = 'rainy';
-  else if (r.tmin != null && r.tmin <= coldAt) r.kind = 'chilly';
-  else if (r.tmax != null && r.tmax >= hotAt) r.kind = 'hot';
+  const kinds = [];
+  if (r.rain != null && r.rain >= rainAt) kinds.push('rainy');
+  if (r.tmin != null && r.tmin <= coldAt) kinds.push('chilly');
+  else if (r.tmax != null && r.tmax >= hotAt) kinds.push('hot');
+  r.kinds = kinds;
+  r.kind = kinds.length ? kinds.join('+') : null;
   return r;
+}
+
+// 星空天氣框要寫的幾行（祐 2026-11-19）：數字一行一行寫，最後是該準備什麼
+const TIPS = { rainy: '記得帶傘', chilly: '天冷了，記得保暖', hot: '天熱了，記得多喝水' };
+function details(r, T = (s, ...a) => s.replace(/\{(\d+)\}/g, (m, i) => a[i])) {
+  if (!r) return { lines: [T('查不到天氣')], tips: [] };
+  const lines = [];
+  if (r.rain != null) lines.push(T('降雨機率最高 {0}%', r.rain));
+  if (r.tmin != null) lines.push(T('氣溫 {0}～{1}°C', Math.round(r.tmin), Math.round(r.tmax)));
+  const kinds = r.kinds || (r.kind ? String(r.kind).split('+') : []);
+  const tips = kinds.length ? kinds.map((k) => T(TIPS[k])) : [T('天氣不錯，不用特別準備')];
+  return { lines, tips };
 }
 
 // T：翻譯函式（主程式傳進來，照介面語言查字典）；沒傳就是繁體中文
@@ -104,4 +120,4 @@ function dueSlot(times, now, fired = {}) {
   return null;
 }
 
-module.exports = { variants, geocode, forecast, decide, summary, parseTimes, dueSlot, dayKey, HOURS };
+module.exports = { variants, geocode, forecast, decide, summary, details, parseTimes, dueSlot, dayKey, HOURS };

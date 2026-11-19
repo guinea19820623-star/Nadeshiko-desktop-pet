@@ -124,7 +124,7 @@ function render() {
   if (document.activeElement !== $('nt-from')) $('nt-from').value = settings.nightFrom || '01:00';
   if (document.activeElement !== $('nt-to')) $('nt-to').value = settings.nightTo || '05:00';
   const wl = settings.weatherLast;
-  $('wx-last').textContent = wl ? `${new Date(wl.at).toLocaleString()}　${wl.text}${wl.kind ? `→ ${T(WX_LABEL[wl.kind])}` : T('→ 不用提醒')}` : '';
+  $('wx-last').textContent = wl ? `${new Date(wl.at).toLocaleString()}　${wl.text}${wl.kind ? `→ ${String(wl.kind).split('+').map((k) => T(WX_LABEL[k] || k)).join(' ＋ ')}` : T('→ 不用提醒')}` : '';
   for (const b of document.querySelectorAll('#force button')) b.classList.toggle('on', (b.dataset.key || null) === (forced || null));
 }
 
@@ -310,6 +310,7 @@ async function main() {
   bindNight();
   bindNotes();
   bindRange('noteWidth', 'noteWidth', (v) => `${v}px`);
+  bindRange('skyWidth', 'skyWidth', (v) => `${v}px`);
   // 主人的生日：月、日兩個下拉選單（預設 1 月 1 日，選了就存 MM-DD），「啟用」打勾才會在生日那天捧蛋糕
   const fill = (sel, n) => {
     sel.innerHTML = '';

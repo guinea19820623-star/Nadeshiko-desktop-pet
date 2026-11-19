@@ -37,6 +37,13 @@ contextBridge.exposeInMainWorld('noteHost', {
   onData: on('note:data'),
 });
 
+// 星空天氣框（祐 2026-11-19）
+contextBridge.exposeInMainWorld('skyHost', {
+  init: () => ipcRenderer.invoke('sky:init'),
+  close: () => ipcRenderer.send('sky:close'),
+  ignore: (v) => ipcRenderer.send('sky:ignore', v),
+});
+
 contextBridge.exposeInMainWorld('panelHost', {
   init: () => ipcRenderer.invoke('panel:init'),
   set: (k, v) => ipcRenderer.send('panel:set', k, v),

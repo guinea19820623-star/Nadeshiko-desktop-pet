@@ -163,7 +163,8 @@ function render(d) {
   const loc = lang === 'ja' ? 'ja-JP' : lang === 'en' ? 'en-US' : 'zh-TW';
   $('date').textContent = new Intl.DateTimeFormat(loc, { month: 'long', day: 'numeric', weekday: 'short' }).format(new Date(y, m - 1, dd));
   const icon = { rainy: '☂', chilly: '❄', hot: '☀' };
-  $('weather').textContent = d.weather && d.weather.text ? `${icon[d.weather.kind] || '☁'} ${d.weather.text}` : '';
+  const icons = d.weather && d.weather.kind ? String(d.weather.kind).split('+').map((k) => icon[k]).filter(Boolean).join('') : '';
+  $('weather').textContent = d.weather && d.weather.text ? `${icons || '☁'} ${d.weather.text}` : '';
   $('close').textContent = T('收起');
   layout();
 
